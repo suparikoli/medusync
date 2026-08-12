@@ -113,6 +113,8 @@ def run():
 
 	frappe.delete_doc("ToDo", todo.name, ignore_permissions=True, force=True)
 
+	_enqueue_signature()
+
 	passed = sum(1 for _, c, _ in results if c)
 	failed = len(results) - passed
 	for label, cond, detail in results:
@@ -120,3 +122,41 @@ def run():
 	print(f"\n{passed} passed, {failed} failed")
 	if failed:
 		raise SystemExit(1)
+
+
+def _enqueue_signature():
+	"""The background path must actually be callable.
+
+	`frappe.enqueue` reserves several kwarg names for itself — `event`,
+	`queue`, `timeout`, `job_name`, `now`, `at_front`. A job argument
+	sharing one of those names is swallowed by enqueue and never reaches
+	the function, which then dies in the worker with "missing 1 required
+	positional argument". Inline delivery calls the function directly and
+	sees none of this, so every assertion above can pass while the queued
+	path is broken — that is exactly what happened on the first live run.
+
+	Rather than require a running worker, assert the contract: no
+	parameter of `deliver` may collide with an enqueue-reserved name.
+	"""
+	import inspect
+
+	from medusync import outbound
+
+	RESERVED = {
+		"queue", "timeout", "event", "is_async", "job_name", "now",
+		"enqueue_after_commit", "at_front", "job_id", "deduplicate",
+		"on_success", "on_failure", "retry",
+	}
+	params = set(inspect.signature(outbound.deliver).parameters) - {"self"}
+	clashes = params & RESERVED
+	ok("no deliver() parameter collides with a frappe.enqueue kwarg", not clashes, sorted(clashes))
+
+	# And the call site must pass every non-defaulted parameter.
+	src = inspect.getsource(outbound.dispatch) + inspect.getsource(outbound._retry_or_fail)
+	required = {
+		n for n, p in inspect.signature(outbound.deliver).parameters.items()
+		if p.default is inspect.Parameter.empty
+	}
+	missing = {n for n in required if f"{n}=" not in src and n != "log_name"}
+	ok("every required deliver() argument is supplied at the enqueue call sites",
+	   not missing, sorted(missing))

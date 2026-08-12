@@ -112,7 +112,7 @@ def dispatch(mapping, doc, docevent: str):
 			"medusync.outbound.deliver",
 			queue=QUEUE,
 			log_name=log.name,
-			event=event,
+			event_name=event,
 			event_id=event_id,
 			payload=payload,
 			attempt=1,
@@ -170,8 +170,15 @@ def build_payload(mapping, doc) -> dict:
 	return data
 
 
-def deliver(log_name: str, event: str, event_id: str, payload: dict, attempt: int = 1):
+def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attempt: int = 1):
 	"""POST one event to Medusa and record the outcome.
+
+	NB the parameter is `event_name`, not `event`. `frappe.enqueue`
+	reserves `event` for its own scheduler-event argument and consumes
+	it, so a kwarg by that name never reaches this function — the job
+	then dies with "missing 1 required positional argument". Inline
+	delivery hides the bug completely, which is how it survived a
+	green test run.
 
 	Runs on the background queue by default. Retries are re-enqueued
 	with backoff rather than looped in-process, so a long outage doesn't
@@ -187,7 +194,7 @@ def deliver(log_name: str, event: str, event_id: str, payload: dict, attempt: in
 		_finish_log(log_name, status="Failed", error="medusa_url or outbound_secret not configured")
 		return
 
-	envelope = {"event": event, "event_id": event_id, "data": payload}
+	envelope = {"event": event_name, "event_id": event_id, "data": payload}
 	body = json.dumps(envelope, separators=(",", ":"), default=str).encode("utf-8")
 
 	try:
@@ -203,7 +210,7 @@ def deliver(log_name: str, event: str, event_id: str, payload: dict, attempt: in
 			verify=bool(cfg.verify_ssl),
 		)
 	except Exception as exc:
-		_retry_or_fail(log_name, event, event_id, payload, attempt, str(exc), status_code=0)
+		_retry_or_fail(log_name, event_name, event_id, payload, attempt, str(exc), status_code=0)
 		return
 
 	text = (response.text or "")[:4000]
@@ -219,7 +226,7 @@ def deliver(log_name: str, event: str, event_id: str, payload: dict, attempt: in
 
 	_retry_or_fail(
 		log_name,
-		event,
+		event_name,
 		event_id,
 		payload,
 		attempt,
@@ -228,7 +235,7 @@ def deliver(log_name: str, event: str, event_id: str, payload: dict, attempt: in
 	)
 
 
-def _retry_or_fail(log_name, event, event_id, payload, attempt, error, status_code=0):
+def _retry_or_fail(log_name, event_name, event_id, payload, attempt, error, status_code=0):
 	cfg = config.settings()
 	max_attempts = cfg.max_attempts or 3
 
@@ -247,7 +254,7 @@ def _retry_or_fail(log_name, event, event_id, payload, attempt, error, status_co
 		"medusync.outbound.deliver",
 		queue=QUEUE,
 		log_name=log_name,
-		event=event,
+		event_name=event_name,
 		event_id=event_id,
 		payload=payload,
 		attempt=attempt + 1,
@@ -270,9 +277,12 @@ def _create_log(**kwargs):
 			value = json.dumps(value, indent=2, default=str)
 		doc.set(key, value)
 	doc.insert(ignore_permissions=True)
-	# Commit the queued row before the job can start — otherwise a fast
-	# worker looks up a log row this transaction hasn't written yet.
-	frappe.db.commit()
+	# Deliberately NOT committing here. This runs inside a document save,
+	# where Frappe refuses a commit outright ("Commit/rollback are
+	# disabled during certain events") because it would break the
+	# atomicity of the user's own save. Ordering is already guaranteed by
+	# `enqueue_after_commit=True` on the job: the worker cannot start
+	# until this transaction lands, log row included.
 	return doc
 
 
@@ -282,6 +292,8 @@ def _finish_log(log_name: str, **kwargs):
 		kwargs.pop("response_body", None)
 	try:
 		frappe.db.set_value("Medusync Log", log_name, kwargs, update_modified=False)
-		frappe.db.commit()
+		# No explicit commit: in the worker, Frappe's job runner commits
+		# on success; inline, the surrounding request transaction does.
+		# Committing here would hit the same doc-event guard as above.
 	except Exception:
 		frappe.log_error(title="Medusync could not update its log", message=frappe.get_traceback())

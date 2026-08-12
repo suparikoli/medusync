@@ -33,6 +33,29 @@ Medusync earns its place when you want:
 bench get-app medusync <repo-url>
 bench --site <site> install-app medusync
 bench --site <site> migrate
+sudo supervisorctl restart all      # or: bench restart
+```
+
+**That last line is not optional on a running site.** Adding an app to
+`sites/apps.txt` makes every request import it, but gunicorn workers
+started before the install cannot see a newly pip-installed package.
+Skip the restart and the entire site returns HTTP 500 —
+`ModuleNotFoundError: No module named 'medusync'` — until you do it.
+That is the whole site, not just the sync.
+
+If you installed by pointing bench at a local directory rather than
+`get-app`, install the package into the bench env first:
+
+```bash
+./env/bin/pip install -e apps/medusync
+```
+
+If `install-app` fails partway with *"Module import failed for Medusync
+Settings"*, the Module Def existed but the doctype loader had a stale
+module map. Recover with:
+
+```bash
+bench --site <site> clear-cache && bench --site <site> migrate
 ```
 
 Then open **Medusync Settings** and set:
