@@ -1,0 +1,149 @@
+{
+ "actions": [],
+ "creation": "2026-08-12 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "connection_section",
+  "medusa_url",
+  "inbound_path",
+  "column_break_conn",
+  "request_timeout",
+  "verify_ssl",
+  "security_section",
+  "inbound_secret",
+  "column_break_sec",
+  "outbound_secret",
+  "delivery_section",
+  "use_background_jobs",
+  "max_attempts",
+  "column_break_del",
+  "log_retention_days",
+  "log_payloads"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "description": "Master switch. When off, nothing is sent to Medusa and inbound requests are accepted but ignored (HTTP 200, status \"disabled\") so the caller does not retry forever.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enable Sync"
+  },
+  {
+   "fieldname": "connection_section",
+   "fieldtype": "Section Break",
+   "label": "Connection"
+  },
+  {
+   "description": "Base URL of the Medusa backend, no trailing slash. e.g. https://admin.example.com",
+   "fieldname": "medusa_url",
+   "fieldtype": "Data",
+   "label": "Medusa URL",
+   "options": "URL"
+  },
+  {
+   "default": "/webhooks/erpnext-inbound",
+   "description": "Path on the Medusa backend that receives our outbound events.",
+   "fieldname": "inbound_path",
+   "fieldtype": "Data",
+   "label": "Medusa Inbound Path"
+  },
+  {
+   "fieldname": "column_break_conn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "15",
+   "fieldname": "request_timeout",
+   "fieldtype": "Int",
+   "label": "Request Timeout (seconds)"
+  },
+  {
+   "default": "1",
+   "description": "Uncheck only for a self-signed staging certificate.",
+   "fieldname": "verify_ssl",
+   "fieldtype": "Check",
+   "label": "Verify SSL"
+  },
+  {
+   "fieldname": "security_section",
+   "fieldtype": "Section Break",
+   "label": "Shared Secrets"
+  },
+  {
+   "description": "Medusa signs requests TO this site with this secret. Must match the Medusa plugin's webhook_secret.",
+   "fieldname": "inbound_secret",
+   "fieldtype": "Password",
+   "label": "Inbound Secret (Medusa → here)"
+  },
+  {
+   "fieldname": "column_break_sec",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "This site signs requests TO Medusa with this secret. Must match the Medusa plugin's frappe_to_medusa_secret.",
+   "fieldname": "outbound_secret",
+   "fieldtype": "Password",
+   "label": "Outbound Secret (here → Medusa)"
+  },
+  {
+   "fieldname": "delivery_section",
+   "fieldtype": "Section Break",
+   "label": "Delivery"
+  },
+  {
+   "default": "1",
+   "description": "Send on the background queue so a slow or down Medusa never blocks a user saving a document. Turn off only for debugging.",
+   "fieldname": "use_background_jobs",
+   "fieldtype": "Check",
+   "label": "Send in Background"
+  },
+  {
+   "default": "3",
+   "description": "Attempts per event before it is parked as failed. Retries are queued with backoff.",
+   "fieldname": "max_attempts",
+   "fieldtype": "Int",
+   "label": "Max Attempts"
+  },
+  {
+   "fieldname": "column_break_del",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "30",
+   "description": "Medusync Log rows older than this are deleted nightly. 0 keeps everything.",
+   "fieldname": "log_retention_days",
+   "fieldtype": "Int",
+   "label": "Log Retention (days)"
+  },
+  {
+   "default": "1",
+   "description": "Store request and response bodies on the log row. Turn OFF on sites syncing personal data you do not want duplicated into logs.",
+   "fieldname": "log_payloads",
+   "fieldtype": "Check",
+   "label": "Log Payload Bodies"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Medusync",
+ "name": "Medusync Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
