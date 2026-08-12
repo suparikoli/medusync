@@ -63,8 +63,20 @@ def on_doc_event(doc, method=None):
 
 def _maybe_dispatch(mapping_name: str, doc, method: str | None):
 	mapping = frappe.get_cached_doc(config.MAPPING_DOCTYPE, mapping_name)
-	if method not in mapping.docevent_list():
+	events = mapping.docevent_list()
+	if method not in events:
 		return
+
+	# Frappe runs `on_update` as part of `insert()`, so a mapping that
+	# listens to BOTH after_insert and on_update emits two events for one
+	# create — same state, twice, doubling traffic and relying on the
+	# receiver being idempotent. Drop the redundant one.
+	#
+	# When on_update is the ONLY configured trigger this must still fire:
+	# the operator has asked for "any change", and a create is a change.
+	if method == "on_update" and doc.flags.get("in_insert") and "after_insert" in events:
+		return
+
 	if not _condition_passes(mapping, doc):
 		return
 	dispatch(mapping, doc, method)
