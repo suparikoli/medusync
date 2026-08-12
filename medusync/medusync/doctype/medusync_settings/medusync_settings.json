@@ -75,7 +75,7 @@
    "description": "Medusa signs requests TO this site with this secret. Must match the Medusa plugin's webhook_secret.",
    "fieldname": "inbound_secret",
    "fieldtype": "Password",
-   "label": "Inbound Secret (Medusa → here)"
+   "label": "Inbound Secret (Medusa \u2192 here)"
   },
   {
    "fieldname": "column_break_sec",
@@ -85,7 +85,7 @@
    "description": "This site signs requests TO Medusa with this secret. Must match the Medusa plugin's frappe_to_medusa_secret.",
    "fieldname": "outbound_secret",
    "fieldtype": "Password",
-   "label": "Outbound Secret (here → Medusa)"
+   "label": "Outbound Secret (here \u2192 Medusa)"
   },
   {
    "fieldname": "delivery_section",
@@ -111,8 +111,8 @@
    "fieldtype": "Column Break"
   },
   {
-   "default": "30",
-   "description": "Medusync Log rows older than this are deleted nightly. 0 keeps everything.",
+   "default": "180",
+   "description": "Medusync Log rows older than this are deleted nightly. Default 180 days \u2014 comfortably past the three months needed to answer 'did this record ever sync, and what happened'. 0 keeps everything, but note these rows carry the synced payload.",
    "fieldname": "log_retention_days",
    "fieldtype": "Int",
    "label": "Log Retention (days)"

@@ -116,7 +116,12 @@ def receive():
 		frappe.db.commit()
 		return _respond(500, ok=False, status="failed", message=str(exc), event=event)
 
-	_close(log, result.get("status", "Success"), document_name=result.get("name"))
+	_close(
+		log,
+		result.get("status", "Success"),
+		document_name=result.get("name"),
+		action=result.get("action"),
+	)
 	frappe.db.commit()
 	return _respond(200, ok=True, status="success", event=event, event_id=event_id, result=result)
 
@@ -156,6 +161,14 @@ def apply_inbound(mapping, envelope: dict) -> dict:
 	for reserved in ("doctype", "owner", "creation", "modified", "modified_by", "docstatus", "idx"):
 		payload.pop(reserved, None)
 
+	# The sender may restrict what it is willing to have done on its
+	# behalf. Intersect with this mapping's own permissions rather than
+	# letting either side alone decide — a mapping that forbids creates
+	# must stay authoritative even if a sender asks for one, and vice
+	# versa.
+	may_create = bool(mapping.allow_insert) and envelope.get("allow_create", True) is not False
+	may_update = bool(mapping.allow_update) and envelope.get("allow_update", True) is not False
+
 	existing = None
 	if key_value:
 		if key_field == "name":
@@ -175,15 +188,15 @@ def apply_inbound(mapping, envelope: dict) -> dict:
 			return {"status": "Success", "action": "deleted", "name": existing}
 
 		if existing:
-			if not mapping.allow_update:
-				return {"status": "Skipped", "reason": "update not permitted by mapping"}
+			if not may_update:
+				return {"status": "Skipped", "reason": "update not permitted"}
 			doc = frappe.get_doc(mapping.document_type, existing)
 			doc.update(payload)
 			doc.save(ignore_permissions=True)
 			return {"status": "Success", "action": "updated", "name": doc.name}
 
-		if not mapping.allow_insert:
-			return {"status": "Skipped", "reason": "insert not permitted by mapping"}
+		if not may_create:
+			return {"status": "Skipped", "reason": "create not permitted"}
 
 		doc = frappe.new_doc(mapping.document_type)
 		doc.update(payload)

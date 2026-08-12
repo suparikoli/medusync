@@ -21,6 +21,7 @@ That's fine: Medusa's own receiver dedupes on `event_id`, so the worst
 case is one redundant round trip, not a loop.
 """
 
+import hashlib
 import json
 
 import frappe
@@ -96,6 +97,28 @@ def dispatch(mapping, doc, docevent: str):
 	event_id = f"frappe:{doc.doctype}:{doc.name}:{doc.get('modified') or now_datetime()}"
 	payload = build_payload(mapping, doc)
 
+	# "Only send when something actually changed."
+	#
+	# Frappe fires on_update for any save, including ones that touched
+	# nothing this mapping cares about. Hashing the PAYLOAD (not the
+	# doc) is the point: an unrelated field changing must not count as a
+	# change for a mapping that doesn't sync that field.
+	payload_hash = hashlib.sha256(
+		json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+	).hexdigest()
+
+	if mapping.get("skip_unchanged") and frappe.db.exists(
+		"Medusync Log",
+		{
+			"direction": "Outbound",
+			"document_type": doc.doctype,
+			"document_name": doc.name,
+			"payload_hash": payload_hash,
+			"status": "Success",
+		},
+	):
+		return
+
 	log = _create_log(
 		direction="Outbound",
 		status="Queued",
@@ -103,6 +126,7 @@ def dispatch(mapping, doc, docevent: str):
 		event_id=event_id,
 		document_type=doc.doctype,
 		document_name=doc.name,
+		payload_hash=payload_hash,
 		request_body=payload,
 	)
 
@@ -215,12 +239,26 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 
 	text = (response.text or "")[:4000]
 	if 200 <= response.status_code < 300:
+		# Medusa reports what it did with the record; store it so
+		# "why is this missing over there" is answerable from the log
+		# alone. Older receivers say nothing — fall back to "updated".
+		action = "updated"
+		try:
+			body_json = json.loads(text or "{}")
+			action = (
+				body_json.get("result", {}).get("action")
+				or body_json.get("action")
+				or "updated"
+			)
+		except Exception:
+			pass
 		_finish_log(
 			log_name,
 			status="Success",
 			status_code=response.status_code,
 			response_body=text,
 			attempt=attempt,
+			action=str(action)[:40],
 		)
 		return
 

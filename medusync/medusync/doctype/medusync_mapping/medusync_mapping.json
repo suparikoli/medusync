@@ -16,6 +16,7 @@
   "condition",
   "column_break_out",
   "include_all_fields",
+  "skip_unchanged",
   "key_field",
   "fields_section",
   "field_map",
@@ -69,7 +70,7 @@
    "depends_on": "eval:doc.direction != 'From Medusa'",
    "fieldname": "outbound_section",
    "fieldtype": "Section Break",
-   "label": "Outbound (this site → Medusa)"
+   "label": "Outbound (this site \u2192 Medusa)"
   },
   {
    "description": "Event name Medusa receives, e.g. customer.updated. Blank derives one from the doctype and docevent.",
@@ -103,6 +104,13 @@
    "label": "Send All Fields"
   },
   {
+   "fieldname": "skip_unchanged",
+   "fieldtype": "Check",
+   "default": "0",
+   "label": "Skip When Nothing Changed",
+   "description": "Do not send when the payload is identical to the last one that succeeded for this document. Only mapped fields count, so an unrelated edit elsewhere on the doc will not re-send."
+  },
+  {
    "default": "name",
    "description": "Field whose value identifies this record on the Medusa side.",
    "fieldname": "key_field",
@@ -124,7 +132,7 @@
    "depends_on": "eval:doc.direction != 'To Medusa'",
    "fieldname": "inbound_section",
    "fieldtype": "Section Break",
-   "label": "Inbound (Medusa → this site)"
+   "label": "Inbound (Medusa \u2192 this site)"
   },
   {
    "default": "1",
@@ -144,7 +152,7 @@
   },
   {
    "default": "0",
-   "description": "Off by default on purpose — a delete arriving over HTTP is rarely what you want.",
+   "description": "Off by default on purpose \u2014 a delete arriving over HTTP is rarely what you want.",
    "fieldname": "allow_delete",
    "fieldtype": "Check",
    "label": "Medusa May Delete Records"
