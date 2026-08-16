@@ -426,14 +426,33 @@ def _bank_account_for_company(company: str) -> str:
 
 
 def _get_gateway_fee_config() -> dict:
-	"""Cross-app accessor for the Polemarch-side gateway-fee config.
+	"""Best-effort accessor for the gateway-fee config.
 
-	Polemarch owns this config (it's polemarch domain accounting). We
-	read it through a fresh `get_single` rather than caching — it's
-	read once per deposit, the cost is negligible, and it sidesteps
-	any cache-invalidation concerns across app boundaries.
+	Polemarch owns this config (it's polemarch domain accounting —
+	which P&L and Input Tax GL accounts the Cashfree fee should hit).
+	The medusync wallet handler reads it to post the side JE.
+
+	To honour the "medusync is operationally independent of polemarch"
+	principle: try the polemarch import, and if polemarch is not
+	installed, return a default config that signals "no side JE
+	posted". The Wallet Deposit itself is still created and submitted
+	— the operator gets a clear log message that the fee config is
+	missing, and can post the side JE manually.
 	"""
-	from polemarch.polemarch_trading.doctype.polemarch_settings.polemarch_settings import (
-		get_gateway_fee_config,
-	)
-	return get_gateway_fee_config()
+	try:
+		from polemarch.polemarch_trading.doctype.polemarch_settings.polemarch_settings import (
+			get_gateway_fee_config,
+		)
+		return get_gateway_fee_config()
+	except ImportError:
+		return {
+			"accounts_configured": False,
+			"fixed_fee": 0,
+			"gst_amount": 0,
+			"total_fee_with_gst": 0,
+			"expense_account": None,
+			"bank_account": None,
+			"gst_strategy": None,
+			"gst_accounts": {},
+			"gst_input_account": None,
+		}
