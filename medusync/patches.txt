@@ -3,8 +3,15 @@
 # Read docs to understand patches: https://frappeframework.com/docs/v14/user/en/database-migrations
 
 [post_model_sync]
-# v1_0 — install the 5 Medusa reference Custom Fields (security_medusa_product_id,
-# security_sale.source + medusa_order_id, wallet_deposit/withdrawal.medusa_originated).
-# These fields sit on Polemarch doctypes but the patch that creates them ships in
-# medusync — see plan mithtech-books/plans/2026-08-17-polemarch-medusync-split.md.
-medusync.patches.v1_0.install_medusa_reference_fields
+# v1_0 was a no-op: it installed 5 Medusa reference Custom Fields
+# (Security.medusa_product_id, Security Sale.medusa_order_id,
+# Security Sale.source, Wallet Deposit/Withdrawal.medusa_originated) on
+# Polemarch doctypes. Polemarch's v0_29_0 patch then drops those 5
+# columns at the operator's direction — the Medusa back-references
+# should NOT live on Polemarch doctypes. The medusync handler pack
+# already uses `frappe.db.has_column(...)` guards so it degrades
+# gracefully when the columns are absent. The v1_0 patch file is
+# kept for historical reference but is intentionally NOT in the
+# patches list, so fresh installs don't recreate the dropped columns.
+# See mithtech-books/plans/2026-08-17-polemarch-medusync-split.md.
+# medusync.patches.v1_0.install_medusa_reference_fields
