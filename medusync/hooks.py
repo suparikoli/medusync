@@ -22,6 +22,39 @@ doc_events = {
 		"on_trash": "medusync.outbound.on_doc_event",
 		"on_update_after_submit": "medusync.outbound.on_doc_event",
 	},
+	"Stock Ledger Entry": {
+		"after_insert": "medusync.handlers.risitex.inventory.on_sle",
+	},
+	"Sales Order": {
+		"on_submit": "medusync.handlers.risitex.inventory.on_sales_order",
+		"on_cancel": "medusync.handlers.risitex.inventory.on_sales_order",
+		"on_update_after_submit": "medusync.handlers.risitex.inventory.on_sales_order",
+	},
+	"Delivery Note": {
+		"on_submit": "medusync.handlers.risitex.reverse.on_delivery_note",
+		"on_cancel": "medusync.handlers.risitex.reverse.on_delivery_note",
+	},
+	"Shipment": {
+		"on_submit": "medusync.handlers.risitex.reverse.on_shipment",
+		"on_update_after_submit": "medusync.handlers.risitex.reverse.on_shipment",
+		"on_cancel": "medusync.handlers.risitex.reverse.on_shipment",
+	},
+	"Sales Invoice": {
+		"on_submit": "medusync.handlers.risitex.reverse.on_sales_invoice",
+		"on_cancel": "medusync.handlers.risitex.reverse.on_sales_invoice",
+	},
+	"Item Price": {
+		"after_insert": "medusync.handlers.risitex.pricing.on_item_price",
+		"on_update": "medusync.handlers.risitex.pricing.on_item_price",
+		"on_trash": "medusync.handlers.risitex.pricing.on_item_price",
+	},
+	"Item": {
+		"on_update": "medusync.handlers.risitex.pricing.on_item",
+	},
+	"Customer": {
+		"after_insert": "medusync.handlers.risitex.pricing.on_customer_group_link",
+		"on_update": "medusync.handlers.risitex.pricing.on_customer_group_link",
+	},
 	"Medusync Mapping": {
 		"on_update": "medusync.config.clear_mapping_cache",
 		"on_trash": "medusync.config.clear_mapping_cache",

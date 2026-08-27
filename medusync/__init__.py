@@ -30,3 +30,17 @@ if not os.environ.get("MEDUSYNC_SKIP_POLEMARCH"):
 			title="medusync: failed to register Polemarch handler pack",
 			message=frappe.get_traceback(),
 		)
+
+	# RISITEX handler pack — same import-time registration as above.
+	# Only the Medusa-initiated return request needs a registry handler
+	# (create_pending_return); the rest of the RISITEX site flows through
+	# the mapping receiver. Safe/idempotent; never touches the DB.
+	try:
+		from medusync.handlers.risitex import register as _register_risitex
+		_register_risitex()
+	except Exception:
+		import frappe
+		frappe.log_error(
+			title="medusync: failed to register RISITEX handler pack",
+			message=frappe.get_traceback(),
+		)
