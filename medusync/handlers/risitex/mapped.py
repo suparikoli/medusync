@@ -27,6 +27,7 @@ Medusa while both are installed on the same site.
 import frappe
 from medusync.handlers.risitex.sales_financials import apply_financials
 from medusync.handlers.risitex.address_sync import sync_customer_addresses
+from medusync.handlers.risitex.contact_sync import sync_customer_contact
 
 _INSERT_DEFAULTS = {
 	"Item": {"item_group": "Products", "stock_uom": "Nos", "is_stock_item": 1},
@@ -39,12 +40,16 @@ _INSERT_DEFAULTS = {
 _SALES_DOCS = ("Sales Order", "Sales Invoice")
 
 
-def _cust_result(doctype, doc, addresses, status):
-	# Customer branch also syncs Address docs (a flat mapping cannot create
-	# the linked Address doctype); non-Customer doctypes get the plain result.
+def _cust_result(doctype, doc, addresses, phone, status):
+	# Customer branch also syncs Address docs + a Contact for the phone (a flat
+	# mapping cannot create the linked Address/Contact doctypes, and mobile_no is
+	# read-only); non-Customer doctypes get the plain result.
 	r = {"doctype": doctype, "name": doc.name, "status": status}
-	if doctype == "Customer" and addresses is not None:
-		r["addresses"] = sync_customer_addresses(doc.name, addresses)
+	if doctype == "Customer":
+		if addresses is not None:
+			r["addresses"] = sync_customer_addresses(doc.name, addresses)
+		if phone:
+			r["contact"] = sync_customer_contact(doc.name, phone, first_name=doc.get("customer_name"))
 	return r
 
 
@@ -178,6 +183,7 @@ def upsert_via_mapping(
 
 	is_delete = bool(event) and event.endswith(".deleted")
 	addresses = payload.pop("medusa_addresses", None) if doctype == "Customer" else None
+	phone = payload.pop("mobile_no", None) if doctype == "Customer" else None
 	if doctype == "Item" and payload.get("item_group"):
 		_ensure_item_group(str(payload.get("item_group")))
 
@@ -217,7 +223,7 @@ def upsert_via_mapping(
 		doc = frappe.get_doc(doctype, existing)
 		_set_fields(doc, payload)
 		doc.save(ignore_permissions=True)
-		return _cust_result(doctype, doc, addresses, "updated")
+		return _cust_result(doctype, doc, addresses, phone, "updated")
 
 	# Item dedupe: a stub may already exist under this item_code (created
 	# as a Sales Order line) with no medusa_product_id — update it rather
@@ -228,7 +234,7 @@ def upsert_via_mapping(
 		doc = frappe.get_doc("Item", payload.get("item_code"))
 		_set_fields(doc, payload)
 		doc.save(ignore_permissions=True)
-		return _cust_result(doctype, doc, addresses, "updated")
+		return _cust_result(doctype, doc, addresses, phone, "updated")
 
 	if not allow_create:
 		return {"doctype": doctype, "name": None, "status": "skipped", "reason": "create not permitted"}
@@ -243,4 +249,4 @@ def upsert_via_mapping(
 			doc.get("email_id") or (str(key_value) if key_value else None) or "Medusa Customer"
 		)
 	doc.insert(ignore_permissions=True)
-	return _cust_result(doctype, doc, addresses, "created")
+	return _cust_result(doctype, doc, addresses, phone, "created")
