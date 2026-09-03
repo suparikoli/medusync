@@ -160,6 +160,22 @@ class TestConflictResolution(IntegrationTestCase):
 		self.assertEqual(doc.mapping_uid, "uid-new-1")
 		self.assertEqual(doc.document_type, "Customer")
 		self.assertEqual(len(doc.field_map), 1)
+		# First contact must not switch on a rule nobody reviewed here.
+		self.assertEqual(doc.enabled, 0)
+		self.assertEqual(res["reason"], "created_disabled")
+
+	def test_an_update_to_a_known_uid_applies_enabled_as_sent(self):
+		doc = self._make("T Known Enable")
+		doc.enabled = 0
+		doc.flags.medusync_applying = True
+		doc.save(ignore_permissions=True)
+		canon = mapping_sync.to_canonical(doc)
+		canon["version"] = doc.version + 1
+		canon["enabled"] = True
+		res = mapping_sync.apply_canonical(canon)
+		self.assertEqual(res["action"], "updated")
+		doc.reload()
+		self.assertEqual(doc.enabled, 1)
 
 	def test_a_higher_version_wins(self):
 		doc = self._make("T Higher")

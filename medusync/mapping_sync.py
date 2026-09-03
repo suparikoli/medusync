@@ -121,7 +121,16 @@ def apply_canonical(canon: dict) -> dict:
 		doc.mapping_uid = uid
 		action = "created"
 
-	doc.enabled = 1 if canon.get("enabled", True) else 0
+	if action == "created":
+		# A mapping we have never seen arrives switched OFF, whatever the
+		# sender says. Turning on a rule nobody has reviewed here is exactly
+		# what the brief forbids, and the copy is necessarily partial:
+		# options that exist on only one side (Send All Fields here, the
+		# Medusa event list there) have nothing to carry them. An operator
+		# enables it once they have looked.
+		doc.enabled = 0
+	else:
+		doc.enabled = 1 if canon.get("enabled", True) else 0
 	doc.document_type = canon.get("doctype") or doc.document_type
 	doc.direction = direction_from_canonical(canon.get("direction"))
 	doc.key_field = canon.get("key_erpnext_field") or "name"
@@ -148,7 +157,11 @@ def apply_canonical(canon: dict) -> dict:
 	doc.version = incoming_version
 	doc.flags.medusync_applying = True
 	doc.save(ignore_permissions=True)
-	return {"action": action, "name": doc.name, "reason": None}
+	return {
+		"action": action,
+		"name": doc.name,
+		"reason": "created_disabled" if action == "created" else None,
+	}
 
 
 def apply_deleted(uid: str) -> dict:

@@ -201,6 +201,17 @@ the two decisions must not disagree. A deleted mapping disables the far
 copy rather than destroying it, so records already correlated by it stay
 traceable.
 
+A mapping arriving under a **uid this site has never seen** is created
+switched **off**, whatever the sender says: first contact between two
+systems that each already had mappings must not enable a rule nobody
+reviewed here. Updates to a uid already held apply as sent.
+
+The canonical form carries what both sides understand: identity, version,
+direction, the key pair and the field pairs. Options that exist on one
+side only — **Send All Fields** here, the Medusa event list there — do not
+travel, so a mapping that relies on them needs that part set again on the
+far side.
+
 ## Loop prevention
 
 An inbound write is an ordinary document save, so it would fire the

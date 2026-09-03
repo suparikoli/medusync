@@ -208,45 +208,6 @@ def send(
 		deliver(**kwargs)
 
 
-def emit(event: str, payload: dict, *, ref: str, doctype: str | None = None, docname: str | None = None):
-	"""Log and send one event to every enabled site.
-
-	The single entry point for handler packs. It does what `dispatch`
-	does for mapping-driven events — one log row per site, the site's own
-	secret and retry schedule, and the echo tag when this change was
-	itself caused by an inbound write — so a pack cannot accidentally
-	reach only one of several stores.
-	"""
-	mark = echo.origin_of(doctype, docname) if doctype and docname else None
-	mark = mark or {}
-	payload_hash = hashlib.sha256(
-		json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-	).hexdigest()
-	for site in sites.all_sites():
-		site_id = site["site_id"]
-		event_id = "frappe:%s:%s:%s" % (event, ref, site_id)
-		log = _create_log(
-			direction="Outbound",
-			status="Queued",
-			event=event,
-			event_id=event_id,
-			document_type=doctype,
-			document_name=docname,
-			payload_hash=payload_hash,
-			site=site_id,
-			request_body=payload,
-		)
-		send(
-			log.name,
-			event,
-			event_id,
-			payload,
-			site_id=site_id,
-			correlation_id=mark.get("correlation_id"),
-			echo_of=mark.get("origin"),
-		)
-
-
 def _condition_passes(mapping, doc) -> bool:
 	if not mapping.condition:
 		return True
