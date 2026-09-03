@@ -34,6 +34,8 @@ from typing import Any, Callable
 
 import frappe
 
+from medusync.handlers import outbound_guard
+
 HANDLERS: dict[str, Callable] = {}
 
 CONF_KEY = "medusync_handler_packs"
@@ -197,20 +199,31 @@ def run_outbound_hooks(doc, method: str | None) -> None:
 	Called from the one wildcard hook. Must never raise: an exception
 	here would abort the user's save, and a domain pack failing is not a
 	reason to refuse a business document.
+
+	It must also never re-enter itself. Reporting a failure writes an
+	Error Log document, which fires this same wildcard hook — so a hook
+	that raises would log, insert, re-enter, raise, and loop forever. The
+	guard refuses re-entry while the dispatcher is already running, and
+	skips Frappe's own bookkeeping doctypes outright.
 	"""
-	if not method:
+	doctype = getattr(doc, "doctype", None)
+	if not method or outbound_guard.is_internal(doctype) or outbound_guard.already_running():
 		return
-	for fn in outbound_hooks_for(getattr(doc, "doctype", None), method):
-		try:
-			fn(doc, method)
-		except Exception:
+	fns = outbound_hooks_for(doctype, method)
+	if not fns:
+		return
+	with outbound_guard.running():
+		for fn in fns:
 			try:
-				frappe.log_error(
-					title=f"Medusync outbound pack hook failed on {getattr(doc, 'doctype', '?')}",
-					message=frappe.get_traceback(),
-				)
+				fn(doc, method)
 			except Exception:
-				pass
+				try:
+					frappe.log_error(
+						title=f"Medusync outbound pack hook failed on {doctype or '?'}",
+						message=frappe.get_traceback(),
+					)
+				except Exception:
+					pass
 
 
 def clear() -> None:

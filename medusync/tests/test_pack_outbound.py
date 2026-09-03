@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - older frappe
 	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
 from medusync import handlers
+from medusync.handlers import outbound_guard
 
 CONF_KEY = handlers.CONF_KEY
 
@@ -107,3 +108,40 @@ class TestPackOutboundHooks(IntegrationTestCase):
 			handlers.run_outbound_hooks(doc, "on_update")  # must not raise
 		finally:
 			handlers.outbound_hooks_for = original
+
+	def test_a_failing_hook_cannot_re_enter_the_dispatcher(self):
+		"""Reporting a failure writes an Error Log, which fires the same
+		wildcard hook. Without a guard that recurses until the worker
+		dies, so the second entry must be refused."""
+		depth = {"max": 0, "now": 0}
+
+		def reentrant(doc, method=None):
+			depth["now"] += 1
+			depth["max"] = max(depth["max"], depth["now"])
+			try:
+				# What frappe.log_error does: insert a document, which
+				# fires the wildcard hook again.
+				handlers.run_outbound_hooks(frappe._dict({"doctype": "Item Price", "name": "X"}), method)
+			finally:
+				depth["now"] -= 1
+
+		original = handlers.outbound_hooks_for
+		handlers.outbound_hooks_for = lambda dt, ev: [reentrant]
+		try:
+			handlers.run_outbound_hooks(frappe._dict({"doctype": "Item Price", "name": "X"}), "on_update")
+		finally:
+			handlers.outbound_hooks_for = original
+		self.assertEqual(depth["max"], 1)
+		self.assertFalse(outbound_guard.already_running())
+
+	def test_frappes_own_bookkeeping_is_never_a_business_change(self):
+		calls = []
+		original = handlers.outbound_hooks_for
+		handlers.outbound_hooks_for = lambda dt, ev: [lambda doc, method=None: calls.append(dt)]
+		try:
+			for doctype in ("Error Log", "Version", "Scheduled Job Log"):
+				handlers.run_outbound_hooks(frappe._dict({"doctype": doctype, "name": "X"}), "after_insert")
+			handlers.run_outbound_hooks(frappe._dict({"doctype": "Item Price", "name": "X"}), "after_insert")
+		finally:
+			handlers.outbound_hooks_for = original
+		self.assertEqual(calls, ["Item Price"])
