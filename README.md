@@ -138,6 +138,10 @@ installations expect. An empty list loads nothing: inbound events then go
 through Medusync Mapping rows only, and `receive_mapped` answers 500 until
 a pack that provides a mapped upsert is configured.
 
+Today the switch gates inbound dispatch and the mapped upsert; the RISITEX
+pack's *outbound* doc-event hooks in `hooks.py` still run on every site
+(see `pending_work/2026-09-04-outbound-hooks-behind-packs.md`).
+
 ## Retries
 
 A delivery that fails is parked with a **Next Attempt At** on its Medusync
