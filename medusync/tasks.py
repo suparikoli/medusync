@@ -6,7 +6,7 @@ import json
 import frappe
 from frappe.utils import add_days, now_datetime
 
-from medusync import config, outbound
+from medusync import config, envelope, outbound
 
 
 def prune_logs():
@@ -34,7 +34,8 @@ def retry_due(limit: int = 200):
 	A failed delivery parks its row with `next_attempt_at` (see
 	`outbound._retry_or_fail`). Rows are claimed (the timestamp cleared)
 	before the job is queued, so an overlapping sweep cannot pick the
-	same row twice.
+	same row twice. A row that used up its attempts is `Poison` and is
+	never picked up here at all.
 	"""
 	if not config.is_enabled():
 		return
@@ -49,7 +50,7 @@ def retry_due(limit: int = 200):
 			["next_attempt_at", "is", "set"],
 			["next_attempt_at", "<=", now_datetime()],
 		],
-		fields=["name", "event", "event_id", "request_body", "attempt"],
+		fields=["name", "event", "event_id", "request_body", "attempt", "site"],
 		order_by="next_attempt_at asc",
 		limit=limit,
 	)
@@ -68,7 +69,17 @@ def retry_due(limit: int = 200):
 			event_id=row.event_id,
 			payload=payload,
 			attempt=attempt,
+			site_id=row.site,
+			kind=_kind_for(row.event),
 			job_id=f"medusync-retry-{row.name}-{attempt}",
 		)
 	if rows and not frappe.flags.in_test:
 		frappe.db.commit()
+
+
+def _kind_for(event: str) -> str:
+	"""Which envelope shape this event travels in. Mapping-configuration
+	events carry the mapping; everything else carries data."""
+	if (event or "").startswith("mapping."):
+		return envelope.KIND_MAPPING
+	return envelope.KIND_EVENT

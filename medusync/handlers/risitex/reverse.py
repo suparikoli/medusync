@@ -1,13 +1,11 @@
 # Post-order reverse path: ERPNext -> Medusa order metadata.
 # Delivery Note -> fulfilment (or RETURN receipt if is_return),
 # Shipment -> tracking, Sales Invoice -> invoice (or REFUND/credit note if is_return).
-import hashlib
-import json
 
 import frappe
 
 from medusync import config
-from medusync.outbound import _create_log, send
+from medusync.outbound import emit
 
 
 def _order_id_from_so(so_name):
@@ -22,13 +20,7 @@ def _deliver(event, medusa_order_id, payload, ref, doctype, docname):
     the outbound HTTP call must never happen inline here."""
     body = dict(payload)
     body["medusa_order_id"] = medusa_order_id
-    event_id = "frappe:%s:%s" % (event, ref)
-    ph = hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode("utf-8")).hexdigest()
-    log = _create_log(
-        direction="Outbound", status="Queued", event=event, event_id=event_id,
-        document_type=doctype, document_name=docname, payload_hash=ph, request_body=body,
-    )
-    send(log.name, event, event_id, body)
+    emit(event, body, ref=ref, doctype=doctype, docname=docname)
 
 
 def _guard():

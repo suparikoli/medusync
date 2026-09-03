@@ -3,34 +3,29 @@
 
 """Medusa → this site.
 
-One generic endpoint, `medusync.api.receive`. It is `allow_guest` on
-purpose: the caller is a server, not a Frappe user, and authentication
-is the HMAC over the raw body. Anything that fails the signature check
-never reaches the document layer.
+One endpoint, `medusync.api.receive`, for every kind of traffic. It is
+`allow_guest` on purpose: the caller is a server, not a Frappe user, and
+authentication is the HMAC over the raw body. Anything that fails the
+signature check never reaches the document layer.
 
-Envelope
---------
-    {
-      "event":    "customer.updated",
-      "event_id": "medusa:cus_01H...:1723459200",
-      "doctype":  "Customer",
-      "key_field": "email_id",          # optional, defaults to "name"
-      "key_value": "someone@example.com",
-      "data":     { ...fields to write... },
-      "ts":       1723459200              # unix seconds, inside the signed body
-    }
+Which site sent it is answered by the signature itself — each Medusync
+Site has its own inbound secret — so a site cannot claim to be another by
+setting a header.
 
-`doctype` may be omitted when the event name matches a mapping's
-derived event; that keeps simple integrations from repeating
-themselves.
+The envelope says what the body holds (see medusync.envelope):
 
-Status codes are chosen so a sender's retry logic does the right
-thing: 401 for a bad signature (don't retry), 200 + status "skipped"
-for events we deliberately ignore (don't retry), 5xx only for genuine
-failures (do retry).
+    kind "event"    a business event; a handler pack or a Medusync Mapping
+                    applies it
+    kind "mapped"   an already-mapped upsert: doctype, key, payload
+    kind "mapping"  the mapping configuration itself, being synchronised
 
-Site-specific behaviour comes from handler packs chosen per site
-(`site_config.json` → `medusync_handler_packs`); see medusync.handlers.
+`receive_mapped` is kept as a thin alias so a Medusa plugin that has not
+been upgraded yet keeps working through a rolling deploy.
+
+Status codes are chosen so a sender's retry logic does the right thing:
+401 for a bad signature (don't retry), 200 + status "skipped" for events
+we deliberately ignore (don't retry), 5xx only for genuine failures (do
+retry).
 """
 
 import json
@@ -38,115 +33,264 @@ import time as _time
 
 import frappe
 
-from medusync import config
+from medusync import config, echo, envelope, mapping_sync, sites
 from medusync.handlers import dispatch as handlers_dispatch
 from medusync.signing import EVENT_ID_HEADER, SIGNATURE_HEADER, verify
 
-_REPLAY_WINDOW_SECONDS = 300
+#: Kept for backward compatibility with anything importing it.
+_REPLAY_WINDOW_SECONDS = envelope.REPLAY_WINDOW_SECONDS
 
 
-def _replay_fresh(envelope: dict) -> bool:
+def _replay_fresh(raw_envelope: dict) -> bool:
 	"""Replay protection. `ts` lives inside the HMAC-signed body, so it
 	cannot be re-dated without breaking the signature. A request that DOES
 	carry a `ts` must be within the window; a request that omits `ts` is
-	accepted for backward-compatibility (the security review recommends
-	making `ts` mandatory once every sender is guaranteed to send it)."""
-	raw_ts = envelope.get("ts")
-	if raw_ts is None:
-		return True
-	try:
-		ts = float(raw_ts)
-	except (TypeError, ValueError):
-		return True
-	return abs(_time.time() - ts) <= _REPLAY_WINDOW_SECONDS
+	accepted for backward-compatibility."""
+	return envelope.is_fresh(envelope.parse(raw_envelope))
 
 
 @frappe.whitelist(allow_guest=True)
 def receive():
-	"""Apply one inbound event. See module docstring for the envelope.
+	"""Apply one inbound message. See the module docstring."""
+	return _receive()
 
-	Two dispatch layers:
-	  1. Handler-driven (`handlers_dispatch`) — used by the configured
-	     handler packs. Each registered handler is a pure function of
-	     `(payload, event_id)` that knows its doctypes intimately.
-	  2. Mapping-driven (`_resolve_mapping` + `apply_inbound`) — the
-	     site-agnostic fallback for events no pack handles, driven by
-	     `Medusync Mapping` rows.
 
-	`ping` is special — it never writes a `Medusync Log` row and always
-	returns `pong` so the admin UI's 'test connection' button works
-	before any operator config.
+@frappe.whitelist(allow_guest=True)
+def receive_mapped():
+	"""Legacy alias for the mapped-push path.
+
+	v1 senders post the mapped shape here and the event shape to
+	`receive`. v2 puts `kind` in the envelope and both arrive at the same
+	place; this endpoint stays so an un-upgraded plugin keeps working.
 	"""
+	return _receive(default_kind=envelope.KIND_MAPPED)
+
+
+def _receive(default_kind: str | None = None):
 	raw = frappe.request.get_data() or b""
-
-	secret = config.get_secret("inbound_secret")
-	if not secret:
-		return _respond(401, ok=False, status="unauthorized", message="inbound_secret is not configured")
-
 	provided = frappe.get_request_header(SIGNATURE_HEADER) or frappe.get_request_header(
 		"X-Frappe-Webhook-Signature"
 	)
-	if not verify(raw, secret, provided):
+
+	site = sites.site_for_signature(raw, provided)
+	if not site and not _legacy_secret_matches(raw, provided):
 		return _respond(401, ok=False, status="unauthorized", message="invalid signature")
+	if site and not site.get("enabled"):
+		return _respond(
+			200, ok=True, status="skipped", message=f"site '{site['site_id']}' is disabled"
+		)
 
 	# Signature first, parsing second — never parse attacker-controlled
 	# JSON before we know who sent it.
 	try:
-		envelope = json.loads(raw.decode("utf-8") or "{}")
+		body = json.loads(raw.decode("utf-8") or "{}")
 	except Exception:
 		return _respond(400, ok=False, status="bad_request", message="body is not valid JSON")
 
-	event = (envelope.get("event") or "").strip()
-	if not event:
+	env = envelope.parse(body)
+	if default_kind and not body.get("kind"):
+		env.kind = default_kind
+	site_id = site["site_id"] if site else (env.origin_site_id or "default")
+
+	if not env.event:
 		return _respond(400, ok=False, status="bad_request", message="missing `event`")
 
-	event_id = (
-		frappe.get_request_header(EVENT_ID_HEADER) or envelope.get("event_id") or ""
-	).strip()
+	header_event_id = (frappe.get_request_header(EVENT_ID_HEADER) or "").strip()
+	event_id = header_event_id or env.event_id
 
-	if event == "ping":
-		return _respond(200, ok=True, status="success", message="pong", event=event)
+	if env.event == "ping":
+		return _respond(200, ok=True, status="success", message="pong", event=env.event, site=site_id)
 
-	if not _replay_fresh(envelope):
-		return _respond(401, ok=False, status="unauthorized", message="stale or missing timestamp (replay window)")
+	if not envelope.is_fresh(env):
+		return _respond(
+			401, ok=False, status="unauthorized", message="stale or missing timestamp (replay window)"
+		)
+
+	# Our own change coming home. Dropping it here is what stops a sync
+	# loop once the round trip has crossed a background worker and the
+	# in-request guard flag is long gone.
+	if envelope.is_echo(env, sites.our_site_ids()):
+		return _respond(
+			200, ok=True, status="skipped", message="echo of our own change", event=env.event, site=site_id
+		)
 
 	if not config.is_enabled():
-		return _respond(200, ok=True, status="skipped", message="sync disabled", event=event)
+		return _respond(200, ok=True, status="skipped", message="sync disabled", event=env.event)
 
 	if not event_id:
 		return _respond(400, ok=False, status="bad_request", message="missing `event_id`")
 
 	# Idempotency. A sender that retries after a timeout must not create
 	# a second document.
-	if frappe.db.exists("Medusync Log", {"event_id": event_id, "status": "Success", "direction": "Inbound"}):
-		return _respond(200, ok=True, status="skipped", message="already applied", event=event, event_id=event_id)
-
-	# Handler-driven dispatch. If a configured pack registered a handler
-	# for this event, it owns the business logic — it can create a Sale +
-	# submit it, post a JE, upsert child rows, etc. We still write a
-	# Medusync Log row so the inbound audit trail is consistent.
-	from medusync.handlers import list_registered
-	if event in list_registered():
-		log = frappe.new_doc("Medusync Log")
-		log.update(
-			{
-				"direction": "Inbound",
-				"status": "Queued",
-				"event": event,
-				"event_id": event_id,
-				"document_type": None,  # handlers may touch many doctypes
-				"request_body": json.dumps(envelope, indent=2, default=str)
-				if config.settings().log_payloads
-				else None,
-			}
+	if frappe.db.exists(
+		"Medusync Log", {"event_id": event_id, "status": "Success", "direction": "Inbound"}
+	):
+		return _respond(
+			200, ok=True, status="skipped", message="already applied", event=env.event, event_id=event_id
 		)
-		log.insert(ignore_permissions=True)
+
+	if env.kind == envelope.KIND_MAPPING:
+		return _apply_mapping(env, event_id, site_id)
+	if env.kind == envelope.KIND_MAPPED:
+		return _apply_mapped(env, event_id, site_id)
+	return _apply_event(env, event_id, site_id)
+
+
+def _legacy_secret_matches(raw: bytes, provided: str | None) -> bool:
+	"""Fallback for a site that has not been migrated to a Medusync Site
+	record yet: the Single's inbound secret still verifies."""
+	secret = config.get_secret("inbound_secret")
+	return bool(secret and provided and verify(raw, secret, provided))
+
+
+def _origin_ref(env, site_id: str) -> str:
+	return f"{env.origin_system or 'medusa'}:{site_id}"
+
+
+def _new_log(env, event_id: str, site_id: str, doctype=None):
+	log = frappe.new_doc("Medusync Log")
+	log.update(
+		{
+			"direction": "Inbound",
+			"status": "Queued",
+			"event": env.event,
+			"event_id": event_id,
+			"document_type": doctype,
+			"site": site_id if frappe.db.exists(sites.SITE_DOCTYPE, site_id) else None,
+			"request_body": json.dumps(env.raw, indent=2, default=str)
+			if config.settings().log_payloads
+			else None,
+		}
+	)
+	log.insert(ignore_permissions=True)
+	return log
+
+
+# ── kind: mapping ────────────────────────────────────────────────────
+
+
+def _apply_mapping(env, event_id: str, site_id: str):
+	"""The mapping configuration itself changed on the other side."""
+	log = _new_log(env, event_id, site_id, doctype=mapping_sync.MAPPING_DOCTYPE)
+	try:
+		if env.event.endswith(".deleted"):
+			result = mapping_sync.apply_deleted((env.mapping or {}).get("uid"))
+		else:
+			result = mapping_sync.apply_canonical(env.mapping or {})
+	except Exception as exc:
+		_close(log, "Failed", error=frappe.get_traceback()[:4000])
+		frappe.db.commit()
+		return _respond(500, ok=False, status="failed", message=str(exc), event=env.event)
+	_close(
+		log,
+		"Skipped" if result.get("action") == "skipped" else "Success",
+		document_name=result.get("name"),
+		action=_clamp_action(result.get("action")),
+	)
+	frappe.db.commit()
+	return _respond(
+		200, ok=True, status="success", event=env.event, event_id=event_id, result=result
+	)
+
+
+# ── kind: mapped ─────────────────────────────────────────────────────
+
+
+def _apply_mapped(env, event_id: str, site_id: str):
+	"""An already-mapped upsert: doctype, key field, key value, payload."""
+	if not env.doctype:
+		return _respond(400, ok=False, status="bad_request", message="missing `doctype`")
+	if not env.key_field or env.key_value in (None, ""):
+		return _respond(
+			200,
+			ok=True,
+			status="skipped",
+			message="missing key/value",
+			doctype=env.doctype,
+			key_field=env.key_field,
+		)
+
+	from medusync.handlers import get_mapped_upsert
+
+	upsert_via_mapping = get_mapped_upsert()
+	if upsert_via_mapping is None:
+		return _respond(
+			500,
+			ok=False,
+			status="failed",
+			message="no configured handler pack provides a mapped upsert (site_config `medusync_handler_packs`)",
+		)
+
+	log = _new_log(env, event_id, site_id, doctype=env.doctype)
+
+	# Switch to Administrator for the dispatch so downstream doc-event
+	# hooks (Contact sync on Customer save, etc.) can read/write linked
+	# doctypes without tripping on Guest-role checks.
+	prev_user = frappe.session.user
+	frappe.set_user("Administrator")
+	try:
+		with echo.inbound_context(
+			correlation_id=env.correlation_id or envelope.new_correlation_id(),
+			origin=_origin_ref(env, site_id),
+		):
+			result = upsert_via_mapping(
+				doctype=env.doctype,
+				key_field=env.key_field,
+				key_value=env.key_value,
+				payload=env.payload or {},
+				event=env.event,
+				event_id=event_id,
+				allow_create=env.allow_create,
+				allow_update=env.allow_update,
+			)
+			name = _result_name(result)
+			if name:
+				echo.mark_touched(env.doctype, name)
+		frappe.db.commit()
+	except Exception as exc:
+		frappe.set_user(prev_user)
+		_close(log, "Failed", error=frappe.get_traceback()[:4000])
+		frappe.db.commit()
+		return _respond(500, ok=False, status="failed", message=str(exc), event=env.event)
+	frappe.set_user(prev_user)
+
+	_close(
+		log,
+		_result_status(result),
+		document_name=_result_name(result),
+		action=_clamp_action(_result_action(result)),
+	)
+	frappe.db.commit()
+	result["ok"] = True
+	if env.mapping_name:
+		result["mapping_name"] = env.mapping_name
+	return _respond(200, ok=True, status="success", event=env.event, event_id=event_id, result=result)
+
+
+# ── kind: event ──────────────────────────────────────────────────────
+
+
+def _apply_event(env, event_id: str, site_id: str):
+	"""A business event. A configured handler pack owns it, or a Medusync
+	Mapping applies it generically."""
+	from medusync.handlers import list_registered
+
+	data = env.data or {}
+	origin = _origin_ref(env, site_id)
+	correlation_id = env.correlation_id or envelope.new_correlation_id()
+
+	if env.event in list_registered():
+		log = _new_log(env, event_id, site_id, doctype=None)
 		try:
-			result = handlers_dispatch(event, envelope.get("data") or {}, event_id=event_id)
+			with echo.inbound_context(correlation_id=correlation_id, origin=origin):
+				result = handlers_dispatch(env.event, data, event_id=event_id)
+				doctype, name = _result_doctype(result), _result_name(result)
+				if doctype and name:
+					echo.mark_touched(doctype, name)
 		except Exception as exc:
 			_close(log, "Failed", error=frappe.get_traceback()[:4000])
 			frappe.db.commit()
-			return _respond(500, ok=False, status="failed", message=str(exc), event=event)
+			return _respond(500, ok=False, status="failed", message=str(exc), event=env.event)
 		_close(
 			log,
 			_result_status(result),
@@ -155,53 +299,45 @@ def receive():
 			action=_clamp_action(_result_action(result)),
 		)
 		frappe.db.commit()
-		return _respond(200, ok=True, status="success", event=event, event_id=event_id, result=result)
+		return _respond(
+			200, ok=True, status="success", event=env.event, event_id=event_id, result=result
+		)
 
-	# Mapping-driven dispatch. Fallback for sites that configure
-	# `Medusync Mapping` rows for events no handler pack covers.
-	mapping = _resolve_mapping(envelope, event)
+	mapping = _resolve_mapping(env.raw, env.event)
 	if not mapping:
 		return _respond(
 			200,
 			ok=True,
 			status="skipped",
-			message=f"no inbound mapping for event '{event}'",
-			event=event,
+			message=f"no inbound mapping for event '{env.event}'",
+			event=env.event,
 		)
 
-	log = frappe.new_doc("Medusync Log")
-	log.update(
-		{
-			"direction": "Inbound",
-			"status": "Queued",
-			"event": event,
-			"event_id": event_id,
-			"document_type": mapping.document_type,
-			"request_body": json.dumps(envelope, indent=2, default=str)
-			if config.settings().log_payloads
-			else None,
-		}
-	)
-	log.insert(ignore_permissions=True)
-
+	log = _new_log(env, event_id, site_id, doctype=mapping.document_type)
 	try:
-		result = apply_inbound(mapping, envelope)
+		with echo.inbound_context(correlation_id=correlation_id, origin=origin):
+			result = apply_inbound(mapping, env.raw)
+			if result.get("name"):
+				echo.mark_touched(mapping.document_type, result["name"])
 	except frappe.PermissionError as exc:
 		_close(log, "Failed", error=str(exc))
-		return _respond(403, ok=False, status="failed", message=str(exc), event=event)
+		return _respond(403, ok=False, status="failed", message=str(exc), event=env.event)
 	except Exception as exc:
 		_close(log, "Failed", error=frappe.get_traceback()[:4000])
 		frappe.db.commit()
-		return _respond(500, ok=False, status="failed", message=str(exc), event=event)
+		return _respond(500, ok=False, status="failed", message=str(exc), event=env.event)
 
 	_close(
 		log,
 		result.get("status", "Success"),
 		document_name=result.get("name"),
-		action=result.get("action"),
+		action=_clamp_action(result.get("action")),
 	)
 	frappe.db.commit()
-	return _respond(200, ok=True, status="success", event=event, event_id=event_id, result=result)
+	return _respond(200, ok=True, status="success", event=env.event, event_id=event_id, result=result)
+
+
+# ── Result interpretation ────────────────────────────────────────────
 
 
 def _result_status(result: dict) -> str:
@@ -209,9 +345,18 @@ def _result_status(result: dict) -> str:
 	status = (result or {}).get("status", "Success")
 	# Normalise — handlers may return "synced", "created", "updated",
 	# "cancelled", "skipped", "idempotent_skip", "exists" — collapse
-	# them into the 4 Medusync Log statuses (Queued, Success, Failed,
-	# Skipped).
-	if status.lower() in ("created", "updated", "synced", "cancelled", "idempotent_skip", "exists", "draft_deleted", "pong", "ok"):
+	# them into the Medusync Log statuses.
+	if status.lower() in (
+		"created",
+		"updated",
+		"synced",
+		"cancelled",
+		"idempotent_skip",
+		"exists",
+		"draft_deleted",
+		"pong",
+		"ok",
+	):
 		return "Success"
 	if status.lower() in ("skipped", "not_found", "already_cancelled", "no_handler_for_event"):
 		return "Skipped"
@@ -265,140 +410,17 @@ def _result_action(result: dict) -> str | None:
 	return None
 
 
-@frappe.whitelist(allow_guest=True)
-def receive_mapped():
-	"""Canonical-mapping push receiver.
-
-	The Medusa erpnext-plugin's `applyMapping` path posts per-mapping
-	per-doctype envelopes here. We HMAC-verify, parse, then hand the
-	upsert to the doctype-aware function the site's configured handler
-	pack provides (`MAPPED_UPSERT`, see medusync.handlers).
-
-	Envelope:
-	  {
-	    event:        'customer.created' | 'customer.updated' | ...,
-	    id:           <unique event id — `<medusa-event-id>:<mapping-id>`>,
-	    mapping_id:   <erpnext_mapping.id on the Medusa side>,
-	    mapping_name: <'Customer ↔ Customer', etc.>,
-	    doctype:      'Customer',
-	    key_field:    'email_id',
-	    key_value:    'user@x.com',
-	    payload:      { <erpnext_field>: <transformed value>, ... },
-	    allow_create: true,      # optional; the sender's own policy
-	    allow_update: true,      # optional
-	    ts:           <unix seconds>
-	  }
-	"""
-	raw = frappe.request.get_data() or b""
-	signature_header = frappe.get_request_header(SIGNATURE_HEADER) or ""
-	secret = config.get_secret("inbound_secret")
-	if not secret:
-		return _respond(500, ok=False, status="failed", message="inbound_secret is not configured")
-	if not verify(raw, secret, signature_header):
-		return _respond(401, ok=False, status="unauthorized", message="invalid signature")
-
-	try:
-		envelope = json.loads(raw.decode("utf-8") or "{}")
-	except Exception:
-		return _respond(400, ok=False, status="bad_request", message="body is not valid JSON")
-
-	event = (envelope.get("event") or "").strip()
-	event_id = (envelope.get("id") or "").strip()
-	doctype = (envelope.get("doctype") or "").strip()
-	key_field = (envelope.get("key_field") or "").strip()
-	key_value = envelope.get("key_value")
-	payload = envelope.get("payload") or {}
-	mapping_name = envelope.get("mapping_name") or "(unnamed)"
-
-	if not _replay_fresh(envelope):
-		return _respond(401, ok=False, status="unauthorized", message="stale or missing timestamp (replay window)")
-
-	if not doctype:
-		return _respond(400, ok=False, status="bad_request", message="missing `doctype`")
-	if not key_field or key_value in (None, ""):
-		return _respond(
-			200, ok=True, status="skipped", message="missing key/value",
-			doctype=doctype, key_field=key_field,
-		)
-	if not config.is_enabled():
-		return _respond(200, ok=True, status="skipped", message="sync disabled", event=event)
-
-	if not event_id:
-		return _respond(400, ok=False, status="bad_request", message="missing `id`")
-
-	if frappe.db.exists("Medusync Log", {"event_id": event_id, "status": "Success", "direction": "Inbound"}):
-		return _respond(200, ok=True, status="skipped", message="already applied", event=event, event_id=event_id)
-
-	from medusync.handlers import get_mapped_upsert
-	upsert_via_mapping = get_mapped_upsert()
-	if upsert_via_mapping is None:
-		return _respond(
-			500, ok=False, status="failed",
-			message="no configured handler pack provides a mapped upsert (site_config `medusync_handler_packs`)",
-		)
-
-	log = frappe.new_doc("Medusync Log")
-	log.update(
-		{
-			"direction": "Inbound",
-			"status": "Queued",
-			"event": event,
-			"event_id": event_id,
-			"document_type": doctype,
-			"request_body": json.dumps(envelope, indent=2, default=str)
-			if config.settings().log_payloads
-			else None,
-		}
-	)
-	log.insert(ignore_permissions=True)
-
-	# Switch to Administrator for the dispatch so downstream doc-event
-	# hooks (Contact sync on Customer save, etc.) can read/write linked
-	# doctypes without tripping on Guest-role checks.
-	prev_user = frappe.session.user
-	frappe.set_user("Administrator")
-	try:
-		result = upsert_via_mapping(
-			doctype=doctype,
-			key_field=key_field,
-			key_value=key_value,
-			payload=payload,
-			event=event,
-			event_id=event_id,
-			allow_create=envelope.get("allow_create", True) is not False,
-			allow_update=envelope.get("allow_update", True) is not False,
-		)
-		frappe.db.commit()
-	except Exception as exc:
-		frappe.set_user(prev_user)
-		_close(
-			log, "Failed",
-			error=frappe.get_traceback()[:4000],
-		)
-		frappe.db.commit()
-		return _respond(500, ok=False, status="failed", message=str(exc), event=event)
-	frappe.set_user(prev_user)
-
-	_close(
-		log,
-		_result_status(result),
-		document_name=_result_name(result),
-		action=_clamp_action(_result_action(result)),
-	)
-	frappe.db.commit()
-	result["ok"] = True
-	result["mapping_name"] = mapping_name
-	return _respond(200, ok=True, status="success", event=event, event_id=event_id, result=result)
+# ── Mapping-driven apply ─────────────────────────────────────────────
 
 
-def _resolve_mapping(envelope: dict, event: str):
+def _resolve_mapping(envelope_raw: dict, event: str):
 	"""Find the Medusync Mapping this event should be applied through.
 
 	Explicit `doctype` in the envelope wins. Otherwise match on the
 	derived event name so a mapping with no custom event name still
 	works without the sender knowing Frappe's doctype names.
 	"""
-	doctype = (envelope.get("doctype") or "").strip()
+	doctype = (envelope_raw.get("doctype") or "").strip()
 	filters = {"enabled": 1, "direction": ["in", ["Two-way", "From Medusa"]]}
 	if doctype:
 		filters["document_type"] = doctype
@@ -415,11 +437,11 @@ def _resolve_mapping(envelope: dict, event: str):
 	return None
 
 
-def apply_inbound(mapping, envelope: dict) -> dict:
+def apply_inbound(mapping, envelope_raw: dict) -> dict:
 	"""Create, update or delete one document from an inbound envelope."""
-	data = envelope.get("data") or {}
-	key_field = (envelope.get("key_field") or mapping.key_field or "name").strip()
-	key_value = envelope.get("key_value") or data.get(key_field)
+	data = envelope_raw.get("data") or {}
+	key_field = (envelope_raw.get("key_field") or mapping.key_field or "name").strip()
+	key_value = envelope_raw.get("key_value") or data.get(key_field)
 
 	payload = _translate(mapping, data)
 	# Never let the wire decide identity or workflow state.
@@ -431,8 +453,8 @@ def apply_inbound(mapping, envelope: dict) -> dict:
 	# letting either side alone decide — a mapping that forbids creates
 	# must stay authoritative even if a sender asks for one, and vice
 	# versa.
-	may_create = bool(mapping.allow_insert) and envelope.get("allow_create", True) is not False
-	may_update = bool(mapping.allow_update) and envelope.get("allow_update", True) is not False
+	may_create = bool(mapping.allow_insert) and envelope_raw.get("allow_create", True) is not False
+	may_update = bool(mapping.allow_update) and envelope_raw.get("allow_update", True) is not False
 
 	existing = None
 	if key_value:
@@ -441,38 +463,37 @@ def apply_inbound(mapping, envelope: dict) -> dict:
 		else:
 			existing = frappe.db.get_value(mapping.document_type, {key_field: key_value}, "name")
 
-	# The flag is what stops this write bouncing straight back out.
-	frappe.flags.medusync_inbound = True
-	try:
-		if envelope.get("event", "").endswith(".deleted"):
-			if not mapping.allow_delete:
-				return {"status": "Skipped", "reason": "delete not permitted by mapping"}
-			if not existing:
-				return {"status": "Skipped", "reason": "already absent"}
-			frappe.delete_doc(mapping.document_type, existing, ignore_permissions=True)
-			return {"status": "Success", "action": "deleted", "name": existing}
+	if envelope_raw.get("event", "").endswith(".deleted"):
+		if not mapping.allow_delete:
+			return {"status": "Skipped", "reason": "delete not permitted by mapping"}
+		if not existing:
+			return {"status": "Skipped", "reason": "already absent"}
+		frappe.delete_doc(mapping.document_type, existing, ignore_permissions=True)
+		return {"status": "Success", "action": "deleted", "name": existing}
 
-		if existing:
-			if not may_update:
-				return {"status": "Skipped", "reason": "update not permitted"}
-			doc = frappe.get_doc(mapping.document_type, existing)
-			doc.update(payload)
-			doc.save(ignore_permissions=True)
-			return {"status": "Success", "action": "updated", "name": doc.name}
-
-		if not may_create:
-			return {"status": "Skipped", "reason": "create not permitted"}
-
-		doc = frappe.new_doc(mapping.document_type)
+	if existing:
+		if not may_update:
+			return {"status": "Skipped", "reason": "update not permitted"}
+		doc = frappe.get_doc(mapping.document_type, existing)
 		doc.update(payload)
-		if key_field != "name" and key_value:
-			doc.set(key_field, key_value)
-		doc.insert(ignore_permissions=True)
-		if mapping.submit_on_insert and doc.meta.is_submittable:
-			doc.submit()
-		return {"status": "Success", "action": "created", "name": doc.name}
-	finally:
-		frappe.flags.medusync_inbound = False
+		doc.save(ignore_permissions=True)
+		return {"status": "Success", "action": "updated", "name": doc.name}
+
+	if not may_create:
+		return {"status": "Skipped", "reason": "create not permitted"}
+
+	doc = frappe.new_doc(mapping.document_type)
+	doc.update(payload)
+	if key_field != "name" and key_value:
+		doc.set(key_field, key_value)
+	doc.insert(ignore_permissions=True)
+	if mapping.submit_on_insert and doc.meta.is_submittable:
+		doc.submit()
+	return {"status": "Success", "action": "created", "name": doc.name}
+
+
+#: Field-map directions whose data does NOT enter this site.
+_NOT_INBOUND = ("To Medusa", "Don't Sync")
 
 
 def _translate(mapping, data: dict) -> dict:
@@ -482,7 +503,7 @@ def _translate(mapping, data: dict) -> dict:
 
 	out = {}
 	for row in mapping.field_map:
-		if row.direction == "To Medusa":
+		if row.direction in _NOT_INBOUND:
 			continue
 		source = row.medusa_path or row.frappe_field
 		if source in data:
@@ -494,8 +515,7 @@ def _close(log, status: str, **kwargs):
 	"""Finish the audit row. Must never raise: by the time we get here the
 	business write has usually been committed, and a validation error on
 	the log row would turn a success into a 5xx that the sender retries
-	forever (which is exactly what happened when a handler returned a
-	docname but the row had no document_type)."""
+	forever."""
 	log.status = status
 	for key, value in kwargs.items():
 		if value is not None:
@@ -512,7 +532,7 @@ def _close(log, status: str, **kwargs):
 			frappe.db.set_value(
 				"Medusync Log",
 				log.name,
-				{"status": status, "document_name": None, "error": (log.get("error") or "")[:4000] or None},
+				{"status": status, "document_name": None},
 				update_modified=False,
 			)
 		except Exception:
@@ -531,56 +551,63 @@ def _respond(http_status: int, **body):
 def health():
 	"""Unauthenticated liveness probe — deliberately says nothing about
 	configuration beyond whether the app is installed and switched on,
-	and which event handlers are registered (so the Medusa admin UI
-	knows what events will be handled without sending a signed ping).
-	"""
+	which event handlers are registered, and how many sites are wired."""
 	from medusync.handlers import list_registered
+
 	frappe.local.response["http_status_code"] = 200
-	frappe.local.response.update({
-		"ok": True,
-		"app": "medusync",
-		"enabled": config.is_enabled(),
-		"inbound_secret_configured": bool(config.get_secret("inbound_secret")),
-		"registered_handlers": list_registered(),
-	})
+	frappe.local.response.update(
+		{
+			"ok": True,
+			"app": "medusync",
+			"enabled": config.is_enabled(),
+			"envelope_version": envelope.ENVELOPE_VERSION,
+			"sites": len(sites.all_sites()),
+			"registered_handlers": list_registered(),
+		}
+	)
 	return
 
 
 @frappe.whitelist()
-def test_medusa_connection():
-	"""Operator convenience: POST a signed ping to the Medusa inbound webhook
-	and report whether Medusa was reachable and accepted our signature."""
+def test_medusa_connection(site_id: str | None = None):
+	"""Operator convenience: POST a signed ping to a site's inbound webhook
+	and report whether it was reachable and accepted our signature."""
 	import requests
-	from medusync.signing import sign, SIGNATURE_HEADER, EVENT_ID_HEADER
 
-	s = config.settings()
-	url = (s.medusa_url or "").rstrip("/")
-	if not url:
-		return {"ok": False, "message": "Medusa URL is not set in Connection."}
-	secret = config.get_secret("outbound_secret")
+	from medusync.signing import sign
+
+	site = sites.get_site(site_id) if site_id else sites.default_site()
+	if not site:
+		return {"ok": False, "message": "No Medusync Site is configured."}
+	target = sites.endpoint(site)
+	if not target:
+		return {"ok": False, "message": f"Site '{site['site_id']}' has no Medusa URL."}
+	secret = sites.secret(site, "outbound_secret")
 	if not secret:
-		return {"ok": False, "message": "Outbound Secret is not set in Shared Secrets."}
-	target = url + (s.inbound_path or "/webhooks/erpnext-inbound")
+		return {"ok": False, "message": f"Site '{site['site_id']}' has no Outbound Secret."}
+
 	eid = "ping-" + frappe.generate_hash(length=10)
-	body = json.dumps({"event": "ping", "event_id": eid, "data": {}, "ts": int(_time.time())}).encode()
-	sig = sign(body, secret)
+	env = envelope.build("ping", eid, site_id=site["site_id"], data={})
+	body = json.dumps(env, separators=(",", ":"), default=str).encode("utf-8")
 	try:
 		r = requests.post(
 			target,
 			data=body,
 			headers={
 				"Content-Type": "application/json",
-				SIGNATURE_HEADER: sig,
+				SIGNATURE_HEADER: sign(body, secret),
 				EVENT_ID_HEADER: eid,
 			},
-			timeout=(s.request_timeout or 15),
+			timeout=sites.timeout(site),
+			verify=sites.verify_ssl(site),
 		)
 		ok = 200 <= r.status_code < 300
 		return {
 			"ok": ok,
+			"site": site["site_id"],
 			"url": target,
 			"status_code": r.status_code,
 			"message": "Reached Medusa." if ok else ("HTTP %s: %s" % (r.status_code, r.text[:300])),
 		}
 	except Exception as exc:
-		return {"ok": False, "url": target, "message": str(exc)[:300]}
+		return {"ok": False, "site": site["site_id"], "url": target, "message": str(exc)[:300]}

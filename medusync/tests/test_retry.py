@@ -7,7 +7,8 @@
 delivery immediately retried it within milliseconds and burned every
 attempt during a single outage. A failed delivery now parks the row with
 `next_attempt_at`; a minute sweep (`medusync.tasks.retry_due`) re-enqueues
-rows whose time has come.
+rows whose time has come, and a row that used up its attempts becomes
+`Poison`, which the sweep never touches again.
 
 The sweep is global by design, and a shared dev site may hold other due
 rows, so assertions are scoped to the rows each test creates.
@@ -92,13 +93,24 @@ class TestRetryBackoff(IntegrationTestCase):
 		self.assertIsNotNone(row.next_attempt_at)
 		self.assertGreater(get_datetime(row.next_attempt_at), now_datetime())
 
-	def test_last_attempt_marks_failed_with_no_next_attempt(self):
+	def test_exhausted_attempts_park_the_row_as_poison(self):
 		self._configure(max_attempts=2, log_payloads=1)
 		log = _queued_log(attempt=2)
 		outbound._retry_or_fail(log.name, "customer.updated", log.event_id, {"a": 1}, 2, "still down", status_code=503)
 		row = frappe.db.get_value("Medusync Log", log.name, ["status", "next_attempt_at"], as_dict=True)
-		self.assertEqual(row.status, "Failed")
+		self.assertEqual(row.status, "Poison")
 		self.assertIsNone(row.next_attempt_at)
+
+	def test_a_poison_row_is_never_swept_again(self):
+		self._configure(max_attempts=3, log_payloads=1, enabled=1)
+		dead = _queued_log(
+			status="Poison",
+			next_attempt_at=add_to_date(now_datetime(), seconds=-5),
+			request_body=json.dumps({"x": 9}),
+		)
+		with patch("frappe.enqueue") as enqueue:
+			tasks.retry_due(limit=10000)
+			self.assertEqual(_calls_for(enqueue, dead.name), [])
 
 	def test_payload_is_kept_for_the_retry_even_when_bodies_are_not_logged(self):
 		self._configure(max_attempts=3, log_payloads=0)
@@ -118,17 +130,10 @@ class TestRetryBackoff(IntegrationTestCase):
 			request_body=json.dumps({"x": 2}),
 		)
 		fresh = _queued_log(request_body=json.dumps({"x": 3}))  # never failed, no next_attempt_at
-		stored = {
-			n: frappe.db.get_value("Medusync Log", n, ["name", "next_attempt_at", "status"], as_dict=True)
-			for n in (due.name, not_yet.name, fresh.name)
-		}
 		with patch("frappe.enqueue") as enqueue:
 			tasks.retry_due(limit=10000)
 			mine = _calls_for(enqueue, due.name, not_yet.name, fresh.name)
-			self.assertEqual(
-				len(mine), 1,
-				msg=f"now={now_datetime()} stored={stored} enqueued={[c.kwargs.get('log_name') for c in mine]}",
-			)
+			self.assertEqual(len(mine), 1)
 			kwargs = mine[0].kwargs
 			self.assertEqual(kwargs["log_name"], due.name)
 			self.assertEqual(kwargs["attempt"], 2)
@@ -142,6 +147,20 @@ class TestRetryBackoff(IntegrationTestCase):
 			self.assertEqual(_calls_for(enqueue, due.name, not_yet.name, fresh.name), [])
 		self.assertIsNotNone(frappe.db.get_value("Medusync Log", not_yet.name, "next_attempt_at"))
 		self.assertIsNone(frappe.db.get_value("Medusync Log", fresh.name, "next_attempt_at"))
+
+	def test_the_sweep_carries_the_site_and_the_envelope_kind(self):
+		self._configure(max_attempts=3, log_payloads=1, enabled=1)
+		row = _queued_log(
+			event="mapping.upserted",
+			site=None,
+			next_attempt_at=add_to_date(now_datetime(), seconds=-5),
+			request_body=json.dumps({"mapping": {"uid": "u1", "version": 2}}),
+		)
+		with patch("frappe.enqueue") as enqueue:
+			tasks.retry_due(limit=10000)
+			mine = _calls_for(enqueue, row.name)
+			self.assertEqual(len(mine), 1)
+			self.assertEqual(mine[0].kwargs["kind"], "mapping")
 
 	def test_sweep_is_inert_when_sync_is_disabled(self):
 		self._configure(max_attempts=3, log_payloads=1, enabled=0)

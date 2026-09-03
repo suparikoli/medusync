@@ -21,6 +21,27 @@ class MedusyncMapping(Document):
 		self.validate_field_map()
 		if not self.key_field:
 			self.key_field = "name"
+		self.stamp_identity()
+
+	def stamp_identity(self):
+		"""Give the mapping an id both systems share, and a version that
+		says whose copy is newer.
+
+		The same mapping exists on the Medusa side; edits can start from
+		either. `mapping_uid` pairs the two copies and `version` orders
+		them. A save that is APPLYING a change from the other side carries
+		its version already and must not bump it, or the two sides would
+		ratchet each other upward forever.
+		"""
+		if not self.mapping_uid:
+			self.mapping_uid = frappe.generate_hash(length=32)
+		if self.flags.get("medusync_applying"):
+			self.version = int(self.version or 1)
+			return
+		if self.is_new():
+			self.version = 1
+		else:
+			self.version = int(self.version or 1) + 1
 
 	def validate_docevents(self):
 		"""Reject unknown docevents at save time.

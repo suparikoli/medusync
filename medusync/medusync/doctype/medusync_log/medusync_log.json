@@ -10,6 +10,7 @@
   "column_break_head",
   "event",
   "event_id",
+  "site",
   "ref_section",
   "document_type",
   "document_name",
@@ -40,8 +41,9 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Queued\nSuccess\nSkipped\nFailed",
-   "reqd": 1
+   "options": "Queued\nSuccess\nSkipped\nFailed\nPoison",
+   "reqd": 1,
+   "description": "Poison means every attempt was used up; it is never retried automatically."
   },
   {
    "fieldname": "column_break_head",
@@ -60,6 +62,15 @@
    "fieldtype": "Data",
    "label": "Event ID",
    "search_index": 1
+  },
+  {
+   "fieldname": "site",
+   "fieldtype": "Link",
+   "options": "Medusync Site",
+   "label": "Site",
+   "in_standard_filter": 1,
+   "in_list_view": 1,
+   "description": "Which Medusa site this row belongs to."
   },
   {
    "fieldname": "ref_section",

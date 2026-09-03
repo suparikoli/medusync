@@ -11,12 +11,17 @@ required_apps = ["erpnext"]
 
 after_install = "medusync.install.after_install"
 
-# ── Outbound ─────────────────────────────────────────────────────────
-# A wildcard hook rather than a per-doctype list. Which doctypes are
-# actually synced is a runtime question answered from Medusync Mapping
-# rows, so an operator can add one from the Desk UI without an app
-# release. `on_doc_event` returns immediately when no mapping matches,
-# and the lookup is served from the request cache.
+# ── Document events ──────────────────────────────────────────────────
+# One wildcard binding, and no business doctype named anywhere in this
+# file. Two runtime questions decide what actually happens on a save:
+#
+#   which doctypes sync   -> Medusync Mapping rows, editable in the Desk
+#   which domain code runs -> the handler packs this site opted into
+#                             (site_config.json → medusync_handler_packs)
+#
+# `on_doc_event` returns immediately when neither has anything to say, and
+# both lookups are served from a request-local cache, so the cost on an
+# unrelated save is a dict miss.
 doc_events = {
 	"*": {
 		"after_insert": "medusync.outbound.on_doc_event",
@@ -26,42 +31,15 @@ doc_events = {
 		"on_trash": "medusync.outbound.on_doc_event",
 		"on_update_after_submit": "medusync.outbound.on_doc_event",
 	},
-	"Stock Ledger Entry": {
-		"after_insert": "medusync.handlers.risitex.inventory.on_sle",
-	},
-	"Sales Order": {
-		"on_submit": "medusync.handlers.risitex.inventory.on_sales_order",
-		"on_cancel": "medusync.handlers.risitex.inventory.on_sales_order",
-		"on_update_after_submit": "medusync.handlers.risitex.inventory.on_sales_order",
-	},
-	"Delivery Note": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_delivery_note",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_delivery_note",
-	},
-	"Shipment": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_shipment",
-		"on_update_after_submit": "medusync.handlers.risitex.reverse.on_shipment",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_shipment",
-	},
-	"Sales Invoice": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_sales_invoice",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_sales_invoice",
-	},
-	"Item Price": {
-		"after_insert": "medusync.handlers.risitex.pricing.on_item_price",
-		"on_update": "medusync.handlers.risitex.pricing.on_item_price",
-		"on_trash": "medusync.handlers.risitex.pricing.on_item_price",
-	},
-	"Item": {
-		"on_update": "medusync.handlers.risitex.pricing.on_item",
-	},
-	"Customer": {
-		"after_insert": "medusync.handlers.risitex.pricing.on_customer_group_link",
-		"on_update": "medusync.handlers.risitex.pricing.on_customer_group_link",
-	},
+	# A mapping is one configuration living in two systems: saving it here
+	# refreshes the hot-path cache and tells the connected sites.
 	"Medusync Mapping": {
-		"on_update": "medusync.config.clear_mapping_cache",
-		"on_trash": "medusync.config.clear_mapping_cache",
+		"on_update": "medusync.mapping_sync.on_mapping_update",
+		"on_trash": "medusync.mapping_sync.on_mapping_trash",
+	},
+	"Medusync Site": {
+		"on_update": "medusync.sites.clear_cache",
+		"on_trash": "medusync.sites.clear_cache",
 	},
 }
 

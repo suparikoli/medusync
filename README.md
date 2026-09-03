@@ -149,6 +149,58 @@ Log row (30 s, then 120 s, 270 s …) and picked up by a once-a-minute
 scheduler sweep (`medusync.tasks.retry_due`), so the scheduler must be
 running. **Max Attempts** in the settings bounds the total.
 
+## Sites
+
+One ERPNext can serve several Medusa stores. Each is a **Medusync Site**
+record holding that store's URL and its own pair of shared secrets, so a
+leak or an outage at one store cannot touch another. A mapping with no
+site applies to every enabled site; one pinned to a site applies only
+there.
+
+An inbound request is attributed to a site **by its signature**, not by
+anything the caller claims, so a site cannot impersonate another by
+setting a header.
+
+Upgrading from the single-connection setup needs no work: the migration
+copies the Single's URL and secrets onto a site called `default`.
+
+## Wire contract (v2)
+
+Every signed body carries a version, a timestamp and an origin:
+
+```json
+{
+  "v": 2,
+  "kind": "event",
+  "event": "customer.updated",
+  "event_id": "frappe:Customer:CUST-0001:2026-09-04 10:00:00:default",
+  "ts": 1788474641,
+  "origin": {
+    "system": "erpnext",
+    "site_id": "default",
+    "correlation_id": "1722607afc9a4e6b95ae85bf1c0746ce"
+  },
+  "data": { "email_id": "someone@example.com" }
+}
+```
+
+`kind` says what the body holds: `event` (a business event), `mapped` (an
+already-mapped upsert with doctype, key and payload) or `mapping` (the
+mapping configuration itself). A body with no `v` is read as v1 and still
+applies, so the two apps can be upgraded one at a time.
+`medusync/envelope.py` and the plugin's `envelope.ts` are mirrors — change
+them together.
+
+## Mapping synchronisation
+
+A mapping is one configuration living in two systems. Both copies share a
+`mapping_uid` and carry a `version`; saving on either side sends
+`mapping.upserted` to the other. The higher version wins, and on a tie
+**ERPNext wins**, because ERPNext owns which documents may sync at all and
+the two decisions must not disagree. A deleted mapping disables the far
+copy rather than destroying it, so records already correlated by it stay
+traceable.
+
 ## Loop prevention
 
 An inbound write is an ordinary document save, so it would fire the
@@ -156,10 +208,14 @@ outbound hook and push the change straight back. Medusync sets
 `frappe.flags.medusync_inbound` for the duration of an inbound apply
 and the outbound hook checks it.
 
-That flag is per-request, so it does not cover a human editing the same
-document at the same moment as an inbound write. That case is handled
-on the Medusa side by `event_id` dedup — the cost is one redundant
-round trip, not a loop.
+The flag is per-request, so on its own it cannot stop the echo a
+background worker sends a moment later, after the request is gone. An
+inbound write therefore also leaves a short-lived breadcrumb on each
+document it touched: "this was last changed by correlation C, which came
+from medusa:site-a". Anything sent about that document within the window
+is stamped `echo_of`, and the far side drops what it recognises as its
+own. The breadcrumb expires, so a person editing the same document a
+minute later is never mistaken for an echo.
 
 ## Operational notes
 

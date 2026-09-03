@@ -7,13 +7,10 @@
 #   - Sales Order submit/cancel/update -> reserved_qty changed (no SLE fires)
 # Both defer to an after-commit job `push_level` that reads the settled Bin
 # (at after_insert neither Bin nor qty_after_transaction is final).
-import hashlib
-import json
-
 import frappe
 
 from medusync import config
-from medusync.outbound import _create_log, deliver
+from medusync.outbound import emit
 
 DEFAULT_SOURCE_WAREHOUSE = "Finished Goods - R"
 
@@ -84,14 +81,10 @@ def push_level(item_code, warehouse, ref):
     if sellable < 0:
         sellable = 0.0
     payload = {"sku": item_code, "quantity": sellable}
-    event = "inventory.level.set"
-    event_id = "frappe:inventory:%s:%s" % (item_code, ref)
-    payload_hash = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
-    log = _create_log(
-        direction="Outbound", status="Queued", event=event, event_id=event_id,
-        document_type="Item", document_name=item_code,
-        payload_hash=payload_hash, request_body=payload,
+    emit(
+        "inventory.level.set",
+        payload,
+        ref="%s:%s" % (item_code, ref),
+        doctype="Item",
+        docname=item_code,
     )
-    deliver(log.name, event, event_id, payload, attempt=1)

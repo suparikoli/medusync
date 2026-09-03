@@ -2,13 +2,11 @@
 #   Item Price -> variant.price.set   (selling price list only)
 #   Item       -> variant.meta.set    (MOQ = min_order_qty)
 #   Customer   -> customer.group.set  (B2B customer group)
-import hashlib
-import json
 
 import frappe
 
 from medusync import config
-from medusync.outbound import _create_log, send
+from medusync.outbound import emit
 
 DEFAULT_SELLING_PL = "Standard Selling"
 
@@ -25,13 +23,7 @@ def _deliver(event, payload, ref, doctype, docname):
     """Log + hand off through the shared channel (queued by default, with
     the same retry/backoff as mapped events). Runs inside a doc event, so
     the outbound HTTP call must never happen inline here."""
-    event_id = "frappe:%s:%s" % (event, ref)
-    ph = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
-    log = _create_log(
-        direction="Outbound", status="Queued", event=event, event_id=event_id,
-        document_type=doctype, document_name=docname, payload_hash=ph, request_body=payload,
-    )
-    send(log.name, event, event_id, payload)
+    emit(event, payload, ref=ref, doctype=doctype, docname=docname)
 
 
 def on_item_price(doc, method=None):

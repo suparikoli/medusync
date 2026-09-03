@@ -6,40 +6,49 @@
 One wildcard `doc_events` hook covers every doctype (see hooks.py); the
 per-doctype decision is made here, at runtime, from Medusync Mapping
 rows. That is what lets an operator add a new synced doctype from the
-Desk UI without an app release.
+Desk UI without an app release. The same hook asks the configured handler
+packs whether they want the event, so no business doctype is named in
+hooks.py at all.
+
+Multi-site
+----------
+A mapping with no site is sent to every enabled Medusync Site; one pinned
+to a site is sent only there. Each site gets its own log row, its own
+secret and its own retry schedule, so an outage at one store cannot stall
+another.
 
 Loop prevention
 ---------------
 An inbound write from Medusa lands as an ordinary document save, which
-would fire this hook and push the change straight back — a permanent
-ping-pong between the two systems. `frappe.flags.medusync_inbound` is
-set for the duration of an inbound apply and checked here.
-
-The flag is per-request, so it does NOT cover the case where Medusa's
-write happens to coincide with a human editing the same doc in Desk.
-That's fine: Medusa's own receiver dedupes on `event_id`, so the worst
-case is one redundant round trip, not a loop.
+would fire this hook and push the change straight back.
+`frappe.flags.medusync_inbound` covers the part of that which happens
+inside the request. What it cannot cover is the part a background worker
+sends moments later, so an inbound write also leaves a breadcrumb on the
+document (see medusync.echo); anything we send about that document within
+the window is stamped `echo_of` and the far side drops it as its own.
 
 Retries
 -------
 `frappe.enqueue` cannot delay a job, so a failed delivery is *parked*:
 the log row keeps `status = Queued` and gets a `next_attempt_at`. The
 once-a-minute sweep `medusync.tasks.retry_due` re-enqueues rows whose
-time has come. Handler packs should send through `send()` so they get
-the same queueing and retry behaviour as mapped events.
+time has come. Attempts exhausted → `Poison`, which is never retried
+automatically.
 """
 
 import hashlib
 import json
-import time
 
 import frappe
 from frappe.utils import add_to_date, now_datetime
 
-from medusync import config
+from medusync import config, echo, envelope, sites
 from medusync.signing import EVENT_ID_HEADER, SIGNATURE_HEADER, sign
 
 QUEUE = "short"
+
+#: Our own doctypes never sync — configuring the sync must not emit sync.
+MEDUSYNC_DOCTYPES = ("Medusync Log", "Medusync Mapping", "Medusync Settings", "Medusync Site")
 
 
 def on_doc_event(doc, method=None):
@@ -51,19 +60,21 @@ def on_doc_event(doc, method=None):
 	try:
 		if frappe.flags.get("medusync_inbound"):
 			return
-		if doc.doctype in ("Medusync Log", "Medusync Mapping", "Medusync Settings"):
+		if doc.doctype in MEDUSYNC_DOCTYPES:
 			return
 		if not config.is_enabled():
 			return
 
-		candidates = config.mappings_for(doc.doctype)
-		if not candidates:
-			return
-
-		for row in candidates:
+		for row in config.mappings_for(doc.doctype):
 			if row["direction"] == "From Medusa":
 				continue
 			_maybe_dispatch(row["name"], doc, method)
+
+		# Domain packs the site opted into. Nothing here names a doctype;
+		# the registry answers from what the configured packs declare.
+		from medusync import handlers
+
+		handlers.run_outbound_hooks(doc, method)
 	except Exception:
 		frappe.log_error(
 			title="Medusync outbound hook failed",
@@ -93,17 +104,13 @@ def _maybe_dispatch(mapping_name: str, doc, method: str | None):
 
 
 def dispatch(mapping, doc, docevent: str):
-	"""Queue one event for delivery.
+	"""Queue one event per site this mapping applies to.
 
 	Split out from the hook path so backfill can replay a record without
 	pretending a document event just happened — the caller has already
 	decided this record qualifies.
 	"""
 	event = mapping.resolved_event_name(docevent)
-	# `modified` is part of the key so a repeated save produces a new
-	# event, but a retry of the SAME save does not apply twice on the
-	# Medusa side.
-	event_id = f"frappe:{doc.doctype}:{doc.name}:{doc.get('modified') or now_datetime()}"
 	payload = build_payload(mapping, doc)
 
 	# "Only send when something actually changed."
@@ -116,32 +123,66 @@ def dispatch(mapping, doc, docevent: str):
 		json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
 	).hexdigest()
 
-	if mapping.get("skip_unchanged") and frappe.db.exists(
-		"Medusync Log",
-		{
-			"direction": "Outbound",
-			"document_type": doc.doctype,
-			"document_name": doc.name,
-			"payload_hash": payload_hash,
-			"status": "Success",
-		},
-	):
-		return
+	# Was this document just written BY one of our sites? Then anything we
+	# send about it is that site's own change coming home; tag it so the
+	# far side can drop it instead of applying it again.
+	mark = echo.origin_of(doc.doctype, doc.name) or {}
+	echo_of = mark.get("origin")
+	correlation_id = mark.get("correlation_id")
 
-	log = _create_log(
-		direction="Outbound",
-		status="Queued",
-		event=event,
-		event_id=event_id,
-		document_type=doc.doctype,
-		document_name=doc.name,
-		payload_hash=payload_hash,
-		request_body=payload,
-	)
-	send(log.name, event, event_id, payload)
+	for site in sites.sites_for_mapping(mapping):
+		site_id = site["site_id"]
+		# `modified` is part of the key so a repeated save produces a new
+		# event, but a retry of the SAME save does not apply twice on the
+		# Medusa side. The site id keeps two sites' rows distinct.
+		event_id = f"frappe:{doc.doctype}:{doc.name}:{doc.get('modified') or now_datetime()}:{site_id}"
+
+		if mapping.get("skip_unchanged") and frappe.db.exists(
+			"Medusync Log",
+			{
+				"direction": "Outbound",
+				"document_type": doc.doctype,
+				"document_name": doc.name,
+				"payload_hash": payload_hash,
+				"status": "Success",
+				"site": site_id,
+			},
+		):
+			continue
+
+		log = _create_log(
+			direction="Outbound",
+			status="Queued",
+			event=event,
+			event_id=event_id,
+			document_type=doc.doctype,
+			document_name=doc.name,
+			payload_hash=payload_hash,
+			site=site_id,
+			request_body=payload,
+		)
+		send(
+			log.name,
+			event,
+			event_id,
+			payload,
+			site_id=site_id,
+			correlation_id=correlation_id,
+			echo_of=echo_of,
+		)
 
 
-def send(log_name: str, event_name: str, event_id: str, payload: dict):
+def send(
+	log_name: str,
+	event_name: str,
+	event_id: str,
+	payload: dict,
+	*,
+	site_id: str | None = None,
+	kind: str = envelope.KIND_EVENT,
+	correlation_id: str | None = None,
+	echo_of: str | None = None,
+):
 	"""Hand one logged event to the delivery channel.
 
 	Background by default (`Send in Background`), so a slow or down Medusa
@@ -150,19 +191,60 @@ def send(log_name: str, event_name: str, event_id: str, payload: dict):
 	directly so they inherit the same behaviour.
 	"""
 	cfg = config.settings()
+	kwargs = dict(
+		log_name=log_name,
+		event_name=event_name,
+		event_id=event_id,
+		payload=payload,
+		attempt=1,
+		site_id=site_id,
+		kind=kind,
+		correlation_id=correlation_id,
+		echo_of=echo_of,
+	)
 	if cfg.use_background_jobs:
-		frappe.enqueue(
-			"medusync.outbound.deliver",
-			queue=QUEUE,
-			log_name=log_name,
-			event_name=event_name,
-			event_id=event_id,
-			payload=payload,
-			attempt=1,
-			enqueue_after_commit=True,
-		)
+		frappe.enqueue("medusync.outbound.deliver", queue=QUEUE, enqueue_after_commit=True, **kwargs)
 	else:
-		deliver(log_name, event_name, event_id, payload, attempt=1)
+		deliver(**kwargs)
+
+
+def emit(event: str, payload: dict, *, ref: str, doctype: str | None = None, docname: str | None = None):
+	"""Log and send one event to every enabled site.
+
+	The single entry point for handler packs. It does what `dispatch`
+	does for mapping-driven events — one log row per site, the site's own
+	secret and retry schedule, and the echo tag when this change was
+	itself caused by an inbound write — so a pack cannot accidentally
+	reach only one of several stores.
+	"""
+	mark = echo.origin_of(doctype, docname) if doctype and docname else None
+	mark = mark or {}
+	payload_hash = hashlib.sha256(
+		json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+	).hexdigest()
+	for site in sites.all_sites():
+		site_id = site["site_id"]
+		event_id = "frappe:%s:%s:%s" % (event, ref, site_id)
+		log = _create_log(
+			direction="Outbound",
+			status="Queued",
+			event=event,
+			event_id=event_id,
+			document_type=doctype,
+			document_name=docname,
+			payload_hash=payload_hash,
+			site=site_id,
+			request_body=payload,
+		)
+		send(
+			log.name,
+			event,
+			event_id,
+			payload,
+			site_id=site_id,
+			correlation_id=mark.get("correlation_id"),
+			echo_of=mark.get("origin"),
+		)
 
 
 def _condition_passes(mapping, doc) -> bool:
@@ -185,6 +267,11 @@ def _condition_passes(mapping, doc) -> bool:
 		return False
 
 
+#: Field-map directions whose data does NOT leave this site. "Don't Sync"
+#: keeps the pair documented in the mapping but moves nothing either way.
+_NOT_OUTBOUND = ("From Medusa", "Don't Sync")
+
+
 def build_payload(mapping, doc) -> dict:
 	"""The `data` object Medusa receives.
 
@@ -199,7 +286,7 @@ def build_payload(mapping, doc) -> dict:
 	else:
 		data = {}
 		for row in mapping.field_map:
-			if row.direction == "From Medusa":
+			if row.direction in _NOT_OUTBOUND:
 				continue
 			target = row.medusa_path or row.frappe_field
 			data[target] = source.get(row.frappe_field)
@@ -213,8 +300,18 @@ def build_payload(mapping, doc) -> dict:
 	return data
 
 
-def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attempt: int = 1):
-	"""POST one event to Medusa and record the outcome.
+def deliver(
+	log_name: str,
+	event_name: str,
+	event_id: str,
+	payload: dict,
+	attempt: int = 1,
+	site_id: str | None = None,
+	kind: str = envelope.KIND_EVENT,
+	correlation_id: str | None = None,
+	echo_of: str | None = None,
+):
+	"""POST one event to one site and record the outcome.
 
 	NB the parameter is `event_name`, not `event`. `frappe.enqueue`
 	reserves `event` for its own scheduler-event argument and consumes
@@ -229,17 +326,42 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 	"""
 	import requests
 
-	cfg = config.settings()
-	endpoint = config.medusa_endpoint()
-	secret = config.get_secret("outbound_secret")
-
-	if not endpoint or not secret:
-		_finish_log(log_name, status="Failed", error="medusa_url or outbound_secret not configured", next_attempt_at=None)
+	site = sites.get_site(site_id) if site_id else sites.default_site()
+	if not site:
+		_finish_log(
+			log_name,
+			status="Failed",
+			error=f"no Medusync Site configured for '{site_id or 'default'}'",
+			next_attempt_at=None,
+		)
 		return
 
-	envelope = {"event": event_name, "event_id": event_id, "data": payload, "ts": int(time.time())}
-	body = json.dumps(envelope, separators=(",", ":"), default=str).encode("utf-8")
+	endpoint = sites.endpoint(site)
+	secret = sites.secret(site, "outbound_secret")
+	if not endpoint or not secret:
+		_finish_log(
+			log_name,
+			status="Failed",
+			error=f"site '{site['site_id']}' has no Medusa URL or outbound secret",
+			next_attempt_at=None,
+		)
+		return
 
+	body_kwargs = {"data": payload} if kind == envelope.KIND_EVENT else {}
+	if kind == envelope.KIND_MAPPING:
+		body_kwargs = {"mapping": (payload or {}).get("mapping")}
+	env = envelope.build(
+		event_name,
+		event_id,
+		site_id=site["site_id"],
+		kind=kind,
+		correlation_id=correlation_id,
+		echo_of=echo_of,
+		**body_kwargs,
+	)
+	body = json.dumps(env, separators=(",", ":"), default=str).encode("utf-8")
+
+	cfg = config.settings()
 	try:
 		response = requests.post(
 			endpoint,
@@ -249,11 +371,11 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 				SIGNATURE_HEADER: sign(body, secret),
 				EVENT_ID_HEADER: event_id,
 			},
-			timeout=cfg.request_timeout or 15,
-			verify=bool(cfg.verify_ssl),
+			timeout=sites.timeout(site),
+			verify=sites.verify_ssl(site),
 		)
 	except Exception as exc:
-		_retry_or_fail(log_name, event_name, event_id, payload, attempt, str(exc), status_code=0)
+		_retry_or_fail(log_name, event_name, event_id, payload, attempt, str(exc), status_code=0, site_id=site["site_id"], kind=kind)
 		return
 
 	text = (response.text or "")[:4000]
@@ -284,6 +406,7 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 			# terminal now, so honour "don't log bodies".
 			fields["request_body"] = None
 		_finish_log(log_name, **fields)
+		_mark_site_seen(site["site_id"])
 		return
 
 	_retry_or_fail(
@@ -294,6 +417,8 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 		attempt,
 		f"HTTP {response.status_code}: {text[:500]}",
 		status_code=response.status_code,
+		site_id=site["site_id"],
+		kind=kind,
 	)
 
 
@@ -304,15 +429,29 @@ def retry_delay_seconds(attempt: int) -> int:
 	return 30 * max(int(attempt or 1), 1) ** 2
 
 
-def _retry_or_fail(log_name, event_name, event_id, payload, attempt, error, status_code=0):
+def _retry_or_fail(
+	log_name,
+	event_name,
+	event_id,
+	payload,
+	attempt,
+	error,
+	status_code=0,
+	site_id=None,
+	kind: str = envelope.KIND_EVENT,
+):
 	cfg = config.settings()
 	max_attempts = cfg.max_attempts or 3
 
 	if attempt >= max_attempts:
-		fields = dict(status="Failed", status_code=status_code, error=error, attempt=attempt, next_attempt_at=None)
+		# Terminal. `Poison` rather than `Failed` so the sweep leaves it
+		# alone and an operator can see, in one filter, what has actually
+		# given up rather than what merely failed once.
+		fields = dict(status="Poison", status_code=status_code, error=error, attempt=attempt, next_attempt_at=None)
 		if not cfg.log_payloads:
 			fields["request_body"] = None
 		_finish_log(log_name, **fields)
+		_mark_site_error(site_id, error)
 		return
 
 	# Park the row; `medusync.tasks.retry_due` re-enqueues it once
@@ -331,6 +470,34 @@ def _retry_or_fail(log_name, event_name, event_id, payload, attempt, error, stat
 		# row is terminal, then it is cleared again (see deliver()).
 		fields["request_body"] = json.dumps(payload, indent=2, default=str)
 	_finish_log(log_name, **fields)
+
+
+# ── Site health ──────────────────────────────────────────────────────
+
+
+def _mark_site_seen(site_id):
+	if not site_id:
+		return
+	try:
+		frappe.db.set_value(
+			sites.SITE_DOCTYPE,
+			site_id,
+			{"last_seen_at": now_datetime(), "last_error": None},
+			update_modified=False,
+		)
+	except Exception:
+		pass
+
+
+def _mark_site_error(site_id, error):
+	if not site_id:
+		return
+	try:
+		frappe.db.set_value(
+			sites.SITE_DOCTYPE, site_id, {"last_error": (error or "")[:1000]}, update_modified=False
+		)
+	except Exception:
+		pass
 
 
 # ── Logging ──────────────────────────────────────────────────────────
