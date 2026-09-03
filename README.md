@@ -123,6 +123,28 @@ bench --site <site> execute medusync.backfill.run --kwargs "{'mapping': 'Custome
 
 Drop `dry_run` once the counts look right.
 
+## Handler packs
+
+medusync's core is domain-neutral. Site-specific behaviour ships as
+*handler packs* under `medusync/handlers/<pack>/` (today: `polemarch`,
+`risitex`). A site chooses which packs load in its `site_config.json`:
+
+```json
+"medusync_handler_packs": ["risitex"]
+```
+
+When the key is absent the `polemarch` pack loads, which is what existing
+installations expect. An empty list loads nothing: inbound events then go
+through Medusync Mapping rows only, and `receive_mapped` answers 500 until
+a pack that provides a mapped upsert is configured.
+
+## Retries
+
+A delivery that fails is parked with a **Next Attempt At** on its Medusync
+Log row (30 s, then 120 s, 270 s …) and picked up by a once-a-minute
+scheduler sweep (`medusync.tasks.retry_due`), so the scheduler must be
+running. **Max Attempts** in the settings bounds the total.
+
 ## Loop prevention
 
 An inbound write is an ordinary document save, so it would fire the
@@ -139,7 +161,7 @@ round trip, not a loop.
 
 - **Log retention.** `Medusync Log` stores whatever your mapping
   carries — on a Customer mapping, that is personal data. Retention
-  defaults to 30 days; set **Log Payload Bodies** off on sites where a
+  defaults to 180 days; set **Log Payload Bodies** off on sites where a
   second copy of that data is not acceptable.
 - **Delivery is queued** by default so a slow Medusa never blocks a
   user's save. Turn it off only while debugging.

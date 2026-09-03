@@ -7,7 +7,7 @@ import json
 import frappe
 
 from medusync import config
-from medusync.outbound import _create_log, deliver
+from medusync.outbound import _create_log, send
 
 
 def _order_id_from_so(so_name):
@@ -17,6 +17,9 @@ def _order_id_from_so(so_name):
 
 
 def _deliver(event, medusa_order_id, payload, ref, doctype, docname):
+    """Log + hand off through the shared channel (queued by default, with
+    the same retry/backoff as mapped events). Runs inside a doc event, so
+    the outbound HTTP call must never happen inline here."""
     body = dict(payload)
     body["medusa_order_id"] = medusa_order_id
     event_id = "frappe:%s:%s" % (event, ref)
@@ -25,7 +28,7 @@ def _deliver(event, medusa_order_id, payload, ref, doctype, docname):
         direction="Outbound", status="Queued", event=event, event_id=event_id,
         document_type=doctype, document_name=docname, payload_hash=ph, request_body=body,
     )
-    deliver(log.name, event, event_id, body, attempt=1)
+    send(log.name, event, event_id, body)
 
 
 def _guard():
@@ -196,12 +199,12 @@ def create_pending_return(medusa_order_id, items):
 # so it arrives through medusync.api.receive with the full transport
 # hardening (HMAC + replay window + idempotency + Medusync Log row).
 # This is the last-mile trigger: the Medusa admin "request return" route
-# POSTs event ; here we turn it into a DRAFT
+# POSTs event `order.return_requested`; here we turn it into a DRAFT
 # return Delivery Note (zero stock impact) awaiting warehouse receipt.
 def handle_return_requested(payload, *, event_id=""):
 	"""Envelope: {"medusa_order_id": "...", "items": [{"sku","qty","reason"}]}.
-	Returns a dict the api._result_* closers understand (name -> the return
-	DN so the audit row links it; status -> Success/Skipped)."""
+	Returns a dict the api._result_* closers understand (`doctype` + `name`
+	link the audit row to the return DN; status -> Success/Skipped)."""
 	oid = payload.get("medusa_order_id") or payload.get("order_id")
 	items = payload.get("items") or []
 	if not oid:
@@ -226,17 +229,14 @@ def handle_return_requested(payload, *, event_id=""):
 	# create_pending_return skips (200, not an error) when nothing has
 	# shipped yet or no SO exists — surface that verbatim so the admin sees
 	# WHY, rather than a silent success.
-	# NB: deliberately avoid the keys api._result_name treats as a docname
-	# (name / customer / sale / medusa_id / ...). The handler-driven receive()
-	# path inserts the Medusync Log row with document_type=None, so setting
-	# document_name (a Dynamic Link) would fail validation ("Document Type
-	# must be set first"). We keep the return DN in  (non-magic),
-	# which still travels back to Medusa in the response .
 	if res.get("skipped"):
 		return {"status": "skipped", "reason": res.get("reason"), "order_id": oid}
 	return {
 		"status": "created",
 		"action": "created",
+		# `doctype` + `name` let api._close link the audit row to the draft DN.
+		"doctype": "Delivery Note",
+		"name": res.get("return_dn"),
 		"return_dn": res.get("return_dn"),
 		"detail": res.get("status"),
 		"order_id": oid,

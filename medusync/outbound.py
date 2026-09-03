@@ -19,13 +19,22 @@ The flag is per-request, so it does NOT cover the case where Medusa's
 write happens to coincide with a human editing the same doc in Desk.
 That's fine: Medusa's own receiver dedupes on `event_id`, so the worst
 case is one redundant round trip, not a loop.
+
+Retries
+-------
+`frappe.enqueue` cannot delay a job, so a failed delivery is *parked*:
+the log row keeps `status = Queued` and gets a `next_attempt_at`. The
+once-a-minute sweep `medusync.tasks.retry_due` re-enqueues rows whose
+time has come. Handler packs should send through `send()` so they get
+the same queueing and retry behaviour as mapped events.
 """
 
 import hashlib
 import json
+import time
 
 import frappe
-from frappe.utils import now_datetime
+from frappe.utils import add_to_date, now_datetime
 
 from medusync import config
 from medusync.signing import EVENT_ID_HEADER, SIGNATURE_HEADER, sign
@@ -129,21 +138,31 @@ def dispatch(mapping, doc, docevent: str):
 		payload_hash=payload_hash,
 		request_body=payload,
 	)
+	send(log.name, event, event_id, payload)
 
+
+def send(log_name: str, event_name: str, event_id: str, payload: dict):
+	"""Hand one logged event to the delivery channel.
+
+	Background by default (`Send in Background`), so a slow or down Medusa
+	never blocks the user's save; inline only when the operator turned the
+	queue off for debugging. Handler packs call this instead of `deliver`
+	directly so they inherit the same behaviour.
+	"""
 	cfg = config.settings()
 	if cfg.use_background_jobs:
 		frappe.enqueue(
 			"medusync.outbound.deliver",
 			queue=QUEUE,
-			log_name=log.name,
-			event_name=event,
+			log_name=log_name,
+			event_name=event_name,
 			event_id=event_id,
 			payload=payload,
 			attempt=1,
 			enqueue_after_commit=True,
 		)
 	else:
-		deliver(log.name, event, event_id, payload, attempt=1)
+		deliver(log_name, event_name, event_id, payload, attempt=1)
 
 
 def _condition_passes(mapping, doc) -> bool:
@@ -204,9 +223,9 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 	delivery hides the bug completely, which is how it survived a
 	green test run.
 
-	Runs on the background queue by default. Retries are re-enqueued
-	with backoff rather than looped in-process, so a long outage doesn't
-	pin a worker.
+	Runs on the background queue by default. A failed attempt parks the
+	row for the retry sweep rather than looping in-process, so a long
+	outage doesn't pin a worker.
 	"""
 	import requests
 
@@ -215,10 +234,10 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 	secret = config.get_secret("outbound_secret")
 
 	if not endpoint or not secret:
-		_finish_log(log_name, status="Failed", error="medusa_url or outbound_secret not configured")
+		_finish_log(log_name, status="Failed", error="medusa_url or outbound_secret not configured", next_attempt_at=None)
 		return
 
-	envelope = {"event": event_name, "event_id": event_id, "data": payload}
+	envelope = {"event": event_name, "event_id": event_id, "data": payload, "ts": int(time.time())}
 	body = json.dumps(envelope, separators=(",", ":"), default=str).encode("utf-8")
 
 	try:
@@ -252,14 +271,19 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 			)
 		except Exception:
 			pass
-		_finish_log(
-			log_name,
+		fields = dict(
 			status="Success",
 			status_code=response.status_code,
 			response_body=text,
 			attempt=attempt,
 			action=str(action)[:40],
+			next_attempt_at=None,
 		)
+		if not cfg.log_payloads:
+			# A retry may have parked the payload on the row; the row is
+			# terminal now, so honour "don't log bodies".
+			fields["request_body"] = None
+		_finish_log(log_name, **fields)
 		return
 
 	_retry_or_fail(
@@ -273,33 +297,40 @@ def deliver(log_name: str, event_name: str, event_id: str, payload: dict, attemp
 	)
 
 
+def retry_delay_seconds(attempt: int) -> int:
+	"""Backoff before the next attempt: 30 s after the first failure,
+	120 s after the second, 270 s after the third … — long enough to ride
+	out a deploy, short enough that a blip clears within minutes."""
+	return 30 * max(int(attempt or 1), 1) ** 2
+
+
 def _retry_or_fail(log_name, event_name, event_id, payload, attempt, error, status_code=0):
 	cfg = config.settings()
 	max_attempts = cfg.max_attempts or 3
 
 	if attempt >= max_attempts:
-		_finish_log(
-			log_name,
-			status="Failed",
-			status_code=status_code,
-			error=error,
-			attempt=attempt,
-		)
+		fields = dict(status="Failed", status_code=status_code, error=error, attempt=attempt, next_attempt_at=None)
+		if not cfg.log_payloads:
+			fields["request_body"] = None
+		_finish_log(log_name, **fields)
 		return
 
-	_finish_log(log_name, status="Queued", status_code=status_code, error=error, attempt=attempt)
-	frappe.enqueue(
-		"medusync.outbound.deliver",
-		queue=QUEUE,
-		log_name=log_name,
-		event_name=event_name,
-		event_id=event_id,
-		payload=payload,
-		attempt=attempt + 1,
-		# 30s, 120s, 270s … — long enough to ride out a deploy.
-		job_id=f"medusync-retry-{log_name}-{attempt + 1}",
-		enqueue_after_commit=True,
+	# Park the row; `medusync.tasks.retry_due` re-enqueues it once
+	# `next_attempt_at` has passed. No immediate re-enqueue: frappe.enqueue
+	# has no delay, and retrying within milliseconds burns every attempt
+	# during a single outage.
+	fields = dict(
+		status="Queued",
+		status_code=status_code,
+		error=error,
+		attempt=attempt,
+		next_attempt_at=add_to_date(now_datetime(), seconds=retry_delay_seconds(attempt)),
 	)
+	if not cfg.log_payloads:
+		# The sweep re-reads the payload from the row. Keep it until the
+		# row is terminal, then it is cleared again (see deliver()).
+		fields["request_body"] = json.dumps(payload, indent=2, default=str)
+	_finish_log(log_name, **fields)
 
 
 # ── Logging ──────────────────────────────────────────────────────────

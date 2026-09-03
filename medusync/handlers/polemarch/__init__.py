@@ -31,6 +31,11 @@ from medusync.handlers.polemarch import (
 )
 
 
+# Doctype-aware upsert used by `medusync.api.receive_mapped` when this
+# pack is configured for the site (see medusync.handlers.get_mapped_upsert).
+MAPPED_UPSERT = "medusync.handlers.polemarch.order.upsert_via_mapping"
+
+
 def register() -> None:
 	"""Register the Polemarch handler pack. Idempotent — safe to re-run."""
 	register_handler("ping",                          common.ping)

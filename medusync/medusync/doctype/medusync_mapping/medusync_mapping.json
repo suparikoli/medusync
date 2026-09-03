@@ -42,7 +42,8 @@
    "fieldname": "enabled",
    "fieldtype": "Check",
    "in_list_view": 1,
-   "label": "Enabled"
+   "label": "Enabled",
+   "description": "Turn this sync on or off without deleting it."
   },
   {
    "fieldname": "column_break_head",
@@ -54,7 +55,8 @@
    "in_list_view": 1,
    "label": "Document Type",
    "options": "DocType",
-   "reqd": 1
+   "reqd": 1,
+   "description": "The ERPNext record type to sync, e.g. Customer, Item, Sales Order."
   },
   {
    "default": "Two-way",
@@ -132,19 +134,22 @@
    "depends_on": "eval:doc.direction != 'To Medusa'",
    "fieldname": "inbound_section",
    "fieldtype": "Section Break",
-   "label": "Inbound (Medusa \u2192 this site)"
+   "label": "Inbound (Medusa \u2192 this site)",
+   "collapsible": 1
   },
   {
    "default": "1",
    "fieldname": "allow_insert",
    "fieldtype": "Check",
-   "label": "Medusa May Create Records"
+   "label": "Medusa May Create Records",
+   "description": "Let Medusa create new records here when it sends one it hasn't seen before."
   },
   {
    "default": "1",
    "fieldname": "allow_update",
    "fieldtype": "Check",
-   "label": "Medusa May Update Records"
+   "label": "Medusa May Update Records",
+   "description": "Let Medusa update existing records here when they change on its side."
   },
   {
    "fieldname": "column_break_in",

@@ -5,6 +5,10 @@ app_description = "Two-way sync between a Frappe/ERPNext site and a Medusa v2 ba
 app_email = "manoj@polemarch.in"
 app_license = "mit"
 
+# The handler packs (inventory, pricing, fulfilment, returns) reach into
+# ERPNext's stock and selling modules; a Frappe-only site cannot host them.
+required_apps = ["erpnext"]
+
 after_install = "medusync.install.after_install"
 
 # ── Outbound ─────────────────────────────────────────────────────────
@@ -62,6 +66,13 @@ doc_events = {
 }
 
 scheduler_events = {
+	"cron": {
+		# Failed deliveries wait for their backoff (Medusync Log.next_attempt_at);
+		# this sweep re-enqueues the ones that are due.
+		"* * * * *": [
+			"medusync.tasks.retry_due",
+		],
+	},
 	"daily": [
 		"medusync.tasks.prune_logs",
 	],

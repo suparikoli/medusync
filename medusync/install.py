@@ -5,11 +5,14 @@ import frappe
 
 
 def after_install():
-	"""Create the Single with safe defaults, switched OFF, and register
-	the Polemarch event-handler pack.
+	"""Create the Single with safe defaults, switched OFF.
 
 	Installing the app must never start moving data on its own — the
 	operator sets the URL and secrets, then flips Enable Sync.
+
+	Handler packs are not registered here: which packs a site loads is a
+	per-site choice (`site_config.json` → `medusync_handler_packs`) and the
+	registry builds itself lazily. See medusync/handlers/__init__.py.
 	"""
 	settings = frappe.get_single("Medusync Settings")
 	settings.enabled = 0
@@ -20,19 +23,10 @@ def after_install():
 	if not settings.max_attempts:
 		settings.max_attempts = 3
 	if not settings.log_retention_days:
-		settings.log_retention_days = 30
+		settings.log_retention_days = 180
 	settings.verify_ssl = 1
 	settings.use_background_jobs = 1
 	settings.log_payloads = 1
 	settings.flags.ignore_permissions = True
 	settings.save()
 	frappe.db.commit()
-
-	# Register the Polemarch handler pack. Idempotent — re-running
-	# after_install is a no-op for handlers that are already wired.
-	# medusync is the wire app; polemarch ships its rich per-event
-	# handlers through this pack because MITHTECH is the only site
-	# that uses medusync today.
-	from medusync.handlers.polemarch import register as register_polemarch
-	register_polemarch()
-

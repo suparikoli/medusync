@@ -16,7 +16,8 @@ Envelope
       "doctype":  "Customer",
       "key_field": "email_id",          # optional, defaults to "name"
       "key_value": "someone@example.com",
-      "data":     { ...fields to write... }
+      "data":     { ...fields to write... },
+      "ts":       1723459200              # unix seconds, inside the signed body
     }
 
 `doctype` may be omitted when the event name matches a mapping's
@@ -27,9 +28,13 @@ Status codes are chosen so a sender's retry logic does the right
 thing: 401 for a bad signature (don't retry), 200 + status "skipped"
 for events we deliberately ignore (don't retry), 5xx only for genuine
 failures (do retry).
+
+Site-specific behaviour comes from handler packs chosen per site
+(`site_config.json` → `medusync_handler_packs`); see medusync.handlers.
 """
 
 import json
+import time as _time
 
 import frappe
 
@@ -37,20 +42,36 @@ from medusync import config
 from medusync.handlers import dispatch as handlers_dispatch
 from medusync.signing import EVENT_ID_HEADER, SIGNATURE_HEADER, verify
 
+_REPLAY_WINDOW_SECONDS = 300
+
+
+def _replay_fresh(envelope: dict) -> bool:
+	"""Replay protection. `ts` lives inside the HMAC-signed body, so it
+	cannot be re-dated without breaking the signature. A request that DOES
+	carry a `ts` must be within the window; a request that omits `ts` is
+	accepted for backward-compatibility (the security review recommends
+	making `ts` mandatory once every sender is guaranteed to send it)."""
+	raw_ts = envelope.get("ts")
+	if raw_ts is None:
+		return True
+	try:
+		ts = float(raw_ts)
+	except (TypeError, ValueError):
+		return True
+	return abs(_time.time() - ts) <= _REPLAY_WINDOW_SECONDS
+
 
 @frappe.whitelist(allow_guest=True)
 def receive():
 	"""Apply one inbound event. See module docstring for the envelope.
 
 	Two dispatch layers:
-	  1. Mapping-driven (`_resolve_mapping` + `apply_inbound`) — used by
-	     sites that wire up `Medusync Mapping` rows for per-doctype
-	     generic upserts. Default for the site-agnostic case.
-	  2. Handler-driven (`handlers_dispatch`) — used by the Polemarch
-	     pack. Each registered handler is a pure function of
-	     `(payload, event_id)` that knows the Polemarch doctypes
-	     intimately. Mapping takes precedence when both are configured
-	     for the same event.
+	  1. Handler-driven (`handlers_dispatch`) — used by the configured
+	     handler packs. Each registered handler is a pure function of
+	     `(payload, event_id)` that knows its doctypes intimately.
+	  2. Mapping-driven (`_resolve_mapping` + `apply_inbound`) — the
+	     site-agnostic fallback for events no pack handles, driven by
+	     `Medusync Mapping` rows.
 
 	`ping` is special — it never writes a `Medusync Log` row and always
 	returns `pong` so the admin UI's 'test connection' button works
@@ -86,6 +107,9 @@ def receive():
 	if event == "ping":
 		return _respond(200, ok=True, status="success", message="pong", event=event)
 
+	if not _replay_fresh(envelope):
+		return _respond(401, ok=False, status="unauthorized", message="stale or missing timestamp (replay window)")
+
 	if not config.is_enabled():
 		return _respond(200, ok=True, status="skipped", message="sync disabled", event=event)
 
@@ -97,11 +121,10 @@ def receive():
 	if frappe.db.exists("Medusync Log", {"event_id": event_id, "status": "Success", "direction": "Inbound"}):
 		return _respond(200, ok=True, status="skipped", message="already applied", event=event, event_id=event_id)
 
-	# Handler-driven dispatch. If a handler is registered for this
-	# event (Polemarch pack does this for 11 events), it owns the
-	# business logic — it can create a Sale + submit it, post a JE,
-	# upsert child rows, etc. We still write a Medusync Log row so the
-	# inbound audit trail is consistent.
+	# Handler-driven dispatch. If a configured pack registered a handler
+	# for this event, it owns the business logic — it can create a Sale +
+	# submit it, post a JE, upsert child rows, etc. We still write a
+	# Medusync Log row so the inbound audit trail is consistent.
 	from medusync.handlers import list_registered
 	if event in list_registered():
 		log = frappe.new_doc("Medusync Log")
@@ -127,15 +150,15 @@ def receive():
 		_close(
 			log,
 			_result_status(result),
+			document_type=_result_doctype(result),
 			document_name=_result_name(result),
-			action=_result_action(result),
+			action=_clamp_action(_result_action(result)),
 		)
 		frappe.db.commit()
 		return _respond(200, ok=True, status="success", event=event, event_id=event_id, result=result)
 
 	# Mapping-driven dispatch. Fallback for sites that configure
-	# `Medusync Mapping` rows for events the handler pack doesn't
-	# cover.
+	# `Medusync Mapping` rows for events no handler pack covers.
 	mapping = _resolve_mapping(envelope, event)
 	if not mapping:
 		return _respond(
@@ -195,6 +218,18 @@ def _result_status(result: dict) -> str:
 	return "Success"
 
 
+def _result_doctype(result) -> str | None:
+	"""A handler may say which doctype it touched (`{"doctype": "Customer"}`).
+	Only a real DocType name is accepted, so the audit row's Dynamic Link can
+	never be asked to point at nothing."""
+	if not result:
+		return None
+	dt = result.get("doctype")
+	if not dt or not isinstance(dt, str):
+		return None
+	return dt if frappe.db.exists("DocType", dt) else None
+
+
 def _result_name(result: dict) -> str | None:
 	"""Pick the most useful docname out of a handler's return envelope."""
 	if not result:
@@ -204,6 +239,20 @@ def _result_name(result: dict) -> str | None:
 		if v:
 			return str(v)
 	return None
+
+
+_ALLOWED_LOG_ACTIONS = {"", "created", "updated", "deleted", "skipped"}
+
+
+def _clamp_action(action):
+	"""Medusync Log.action is a Select of a fixed vocabulary; handlers may
+	return richer verbs (disabled, cancelled, ...). Map anything outside the
+	allowed set onto the closest valid value so a log write never 417s."""
+	if action in _ALLOWED_LOG_ACTIONS:
+		return action
+	if action in ("disabled", "cancelled", "canceled"):
+		return "updated"
+	return "updated"
 
 
 def _result_action(result: dict) -> str | None:
@@ -221,10 +270,9 @@ def receive_mapped():
 	"""Canonical-mapping push receiver.
 
 	The Medusa erpnext-plugin's `applyMapping` path posts per-mapping
-	per-doctype envelopes here. We HMAC-verify, parse, then dispatch
-	to a per-doctype handler in the Polemarch pack (Customer,
-	Security Sale, etc.) — falling back to the generic upsert when
-	no special handler is needed.
+	per-doctype envelopes here. We HMAC-verify, parse, then hand the
+	upsert to the doctype-aware function the site's configured handler
+	pack provides (`MAPPED_UPSERT`, see medusync.handlers).
 
 	Envelope:
 	  {
@@ -235,7 +283,10 @@ def receive_mapped():
 	    doctype:      'Customer',
 	    key_field:    'email_id',
 	    key_value:    'user@x.com',
-	    payload:      { <erpnext_field>: <transformed value>, ... }
+	    payload:      { <erpnext_field>: <transformed value>, ... },
+	    allow_create: true,      # optional; the sender's own policy
+	    allow_update: true,      # optional
+	    ts:           <unix seconds>
 	  }
 	"""
 	raw = frappe.request.get_data() or b""
@@ -259,6 +310,9 @@ def receive_mapped():
 	payload = envelope.get("payload") or {}
 	mapping_name = envelope.get("mapping_name") or "(unnamed)"
 
+	if not _replay_fresh(envelope):
+		return _respond(401, ok=False, status="unauthorized", message="stale or missing timestamp (replay window)")
+
 	if not doctype:
 		return _respond(400, ok=False, status="bad_request", message="missing `doctype`")
 	if not key_field or key_value in (None, ""):
@@ -274,6 +328,14 @@ def receive_mapped():
 
 	if frappe.db.exists("Medusync Log", {"event_id": event_id, "status": "Success", "direction": "Inbound"}):
 		return _respond(200, ok=True, status="skipped", message="already applied", event=event, event_id=event_id)
+
+	from medusync.handlers import get_mapped_upsert
+	upsert_via_mapping = get_mapped_upsert()
+	if upsert_via_mapping is None:
+		return _respond(
+			500, ok=False, status="failed",
+			message="no configured handler pack provides a mapped upsert (site_config `medusync_handler_packs`)",
+		)
 
 	log = frappe.new_doc("Medusync Log")
 	log.update(
@@ -296,7 +358,6 @@ def receive_mapped():
 	prev_user = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
-		from medusync.handlers.polemarch.order import upsert_via_mapping
 		result = upsert_via_mapping(
 			doctype=doctype,
 			key_field=key_field,
@@ -304,6 +365,8 @@ def receive_mapped():
 			payload=payload,
 			event=event,
 			event_id=event_id,
+			allow_create=envelope.get("allow_create", True) is not False,
+			allow_update=envelope.get("allow_update", True) is not False,
 		)
 		frappe.db.commit()
 	except Exception as exc:
@@ -320,7 +383,7 @@ def receive_mapped():
 		log,
 		_result_status(result),
 		document_name=_result_name(result),
-		action=f"{mapping_name} | {_result_action(result)}",
+		action=_clamp_action(_result_action(result)),
 	)
 	frappe.db.commit()
 	result["ok"] = True
@@ -428,11 +491,32 @@ def _translate(mapping, data: dict) -> dict:
 
 
 def _close(log, status: str, **kwargs):
+	"""Finish the audit row. Must never raise: by the time we get here the
+	business write has usually been committed, and a validation error on
+	the log row would turn a success into a 5xx that the sender retries
+	forever (which is exactly what happened when a handler returned a
+	docname but the row had no document_type)."""
 	log.status = status
 	for key, value in kwargs.items():
 		if value is not None:
 			log.set(key, value)
-	log.save(ignore_permissions=True)
+	# `document_name` is a Dynamic Link on `document_type`; without the
+	# type it cannot validate, so keep the name out rather than fail.
+	if not log.get("document_type"):
+		log.document_name = None
+	try:
+		log.save(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(title="Medusync could not close its log row", message=frappe.get_traceback())
+		try:
+			frappe.db.set_value(
+				"Medusync Log",
+				log.name,
+				{"status": status, "document_name": None, "error": (log.get("error") or "")[:4000] or None},
+				update_modified=False,
+			)
+		except Exception:
+			pass
 
 
 def _respond(http_status: int, **body):
@@ -460,3 +544,43 @@ def health():
 		"registered_handlers": list_registered(),
 	})
 	return
+
+
+@frappe.whitelist()
+def test_medusa_connection():
+	"""Operator convenience: POST a signed ping to the Medusa inbound webhook
+	and report whether Medusa was reachable and accepted our signature."""
+	import requests
+	from medusync.signing import sign, SIGNATURE_HEADER, EVENT_ID_HEADER
+
+	s = config.settings()
+	url = (s.medusa_url or "").rstrip("/")
+	if not url:
+		return {"ok": False, "message": "Medusa URL is not set in Connection."}
+	secret = config.get_secret("outbound_secret")
+	if not secret:
+		return {"ok": False, "message": "Outbound Secret is not set in Shared Secrets."}
+	target = url + (s.inbound_path or "/webhooks/erpnext-inbound")
+	eid = "ping-" + frappe.generate_hash(length=10)
+	body = json.dumps({"event": "ping", "event_id": eid, "data": {}, "ts": int(_time.time())}).encode()
+	sig = sign(body, secret)
+	try:
+		r = requests.post(
+			target,
+			data=body,
+			headers={
+				"Content-Type": "application/json",
+				SIGNATURE_HEADER: sig,
+				EVENT_ID_HEADER: eid,
+			},
+			timeout=(s.request_timeout or 15),
+		)
+		ok = 200 <= r.status_code < 300
+		return {
+			"ok": ok,
+			"url": target,
+			"status_code": r.status_code,
+			"message": "Reached Medusa." if ok else ("HTTP %s: %s" % (r.status_code, r.text[:300])),
+		}
+	except Exception as exc:
+		return {"ok": False, "url": target, "message": str(exc)[:300]}
