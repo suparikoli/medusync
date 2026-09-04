@@ -31,3 +31,23 @@ against.
 
 **Dependencies.** Phase 1 (`Medusync Site`, envelope v2, mapping model v2,
 opt-in handler packs). A demo wallet doctype or a client site with one.
+
+## What was cleared away on 2026-09-05
+
+Auditing this before Phase 6 found that the Phase 0 removal took the
+modules and left everything pointing at them. The Medusa side had three
+pieces of debris and they are fixed (see the plugin's copy of this file).
+
+On this side there is one thing left, and it is left on purpose:
+**`Customer.wallet_balance_paise` still exists** and nothing writes to it.
+It came from the uninstalled `risitex_erp` app. Deleting it would be tidy
+and would also throw away the obvious landing place for a balance when the
+contract below is built, so it stays until that decision is made.
+
+There is no wallet DocType on this site at all — `RISITEX Wallet
+Settlement` went with the uninstall — so nothing on the ERPNext side can
+be mapped to a wallet today. The Medusa side does have a real wallet with
+real data (`cashfree_wallet`: 22 wallets, 11 transactions), but it belongs
+to the Polemarch securities domain rather than to the generic commerce
+contract this file is about. It is a reasonable thing to test the
+transport against; it is not the thing to model the contract on.
