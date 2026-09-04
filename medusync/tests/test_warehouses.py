@@ -146,6 +146,15 @@ class TestTheMap(WarehouseCase):
 		warehouses.clear_cache()
 		self.assertEqual(warehouses.targets_for(self.wh_a), [])
 
+	def test_the_same_warehouse_listed_twice_is_refused(self):
+		# The map collapses to one location per warehouse, so a second row
+		# for the same one would simply win, quietly, and the store would
+		# start receiving stock at a location nobody chose.
+		site = self._site("wh-dupe", [(self.wh_a, "sloc_a")])
+		site.append("warehouses", {"warehouse": self.wh_a, "location_id": "sloc_other", "enabled": 1})
+		with self.assertRaises(frappe.ValidationError):
+			site.save(ignore_permissions=True)
+
 	def test_the_set_of_warehouses_worth_watching(self):
 		self._site("wh-watch", [(self.wh_a, "sloc_a")])
 		self._disable_others()

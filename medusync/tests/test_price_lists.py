@@ -175,6 +175,30 @@ class TestTheRules(PriceListCase):
 		by_site = {r["site_id"]: r["role"] for r in price_lists.rules_for(self.pl_a)}
 		self.assertEqual(by_site, {"pl-g": "Base Price", "pl-h": "Tier Price"})
 
+	def test_the_same_list_listed_twice_for_one_store_is_refused(self):
+		# Two rules for one list at one store is not a conflict the code can
+		# see; the second simply wins, and the store starts pricing from a
+		# rule nobody chose.
+		site = self._site(
+			"pl-dupe", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}]
+		)
+		site.append(
+			"price_lists",
+			{"price_list": self.pl_a, "direction": "To Medusa", "role": "Tier Price", "tier_code": "t"},
+		)
+		with self.assertRaises(frappe.ValidationError):
+			site.save(ignore_permissions=True)
+
+	def test_a_tier_row_without_a_code_is_refused(self):
+		# It could never be applied at the far end, and the failure would
+		# arrive as a stream of skipped events rather than as the
+		# configuration mistake it is.
+		with self.assertRaises(frappe.ValidationError):
+			self._site(
+				"pl-notier",
+				[{"price_list": self.pl_a, "direction": "To Medusa", "role": "Tier Price"}],
+			)
+
 	def test_a_disabled_row_is_ignored(self):
 		site = self._site(
 			"pl-i", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}]
