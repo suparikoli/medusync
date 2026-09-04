@@ -30,7 +30,7 @@ class TestFieldDirection(IntegrationTestCase):
 		doc.update(
 			{
 				"title": TITLE,
-				"enabled": 1,
+				"enabled": 0,
 				"document_type": "Customer",
 				"direction": "Two-way",
 				"key_field": "email_id",
@@ -45,6 +45,14 @@ class TestFieldDirection(IntegrationTestCase):
 		):
 			doc.append("field_map", row)
 		doc.insert(ignore_permissions=True)
+		# Switching a mapping on now needs a rehearsal that matches it (see
+		# medusync.studio). This fixture is about field directions, not the
+		# gate, so it records a pass and sets the flag straight in the table.
+		from medusync import studio
+
+		studio.record_result(doc.name, passed=True, report="fixture")
+		frappe.db.set_value("Medusync Mapping", doc.name, "enabled", 1, update_modified=False)
+		doc.reload()
 		self.mapping = doc
 
 	def tearDown(self):

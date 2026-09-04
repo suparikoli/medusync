@@ -30,6 +30,7 @@ retry).
 
 import json
 import time as _time
+from dataclasses import dataclass, field
 
 import frappe
 
@@ -129,6 +130,13 @@ def _receive(default_kind: str | None = None):
 			200, ok=True, status="skipped", message="already applied", event=env.event, event_id=event_id
 		)
 
+	# A rehearsal from the other side. It has already passed the signature
+	# check, the replay window and the echo test, so a green answer proves
+	# everything except the write — and the write is the only part a dry
+	# run must not do.
+	if getattr(env, "dry_run", False):
+		return _rehearse(env, event_id, site_id)
+
 	if env.kind == envelope.KIND_MAPPING:
 		return _apply_mapping(env, event_id, site_id)
 	if env.kind == envelope.KIND_MAPPED:
@@ -147,7 +155,7 @@ def _origin_ref(env, site_id: str) -> str:
 	return f"{env.origin_system or 'medusa'}:{site_id}"
 
 
-def _new_log(env, event_id: str, site_id: str, doctype=None):
+def _new_log(env, event_id: str, site_id: str, doctype=None, is_test: bool = False):
 	log = frappe.new_doc("Medusync Log")
 	log.update(
 		{
@@ -155,6 +163,7 @@ def _new_log(env, event_id: str, site_id: str, doctype=None):
 			"status": "Queued",
 			"event": env.event,
 			"event_id": event_id,
+			"is_test": 1 if is_test else 0,
 			"document_type": doctype,
 			"site": site_id if frappe.db.exists(sites.SITE_DOCTYPE, site_id) else None,
 			"request_body": json.dumps(env.raw, indent=2, default=str)
@@ -164,6 +173,74 @@ def _new_log(env, event_id: str, site_id: str, doctype=None):
 	)
 	log.insert(ignore_permissions=True)
 	return log
+
+
+# ── Rehearsals ───────────────────────────────────────────────────────
+
+
+def _rehearse(env, event_id: str, site_id: str):
+	"""Decide what this envelope would do, report it, and write nothing.
+
+	Answers 200 whatever it finds. A rehearsal that discovers the mapping
+	would refuse the payload has done its job; telling the sender to retry
+	would be wrong twice over.
+	"""
+	log = _new_log(env, event_id, site_id, doctype=env.doctype, is_test=True)
+	try:
+		if env.kind == envelope.KIND_MAPPED:
+			verdict = catalogue.guard(env.doctype, env.key_field, env.key_value, env.event)
+			existing = catalogue.find(env.doctype, env.key_field, env.key_value) if env.doctype else None
+			result = {
+				"kind": envelope.KIND_MAPPED,
+				"doctype": env.doctype,
+				"key_field": env.key_field,
+				"key_value": env.key_value,
+				"action": "skipped"
+				if verdict.blocked
+				else ("updated" if existing else "created"),
+				"existing": existing,
+				"reason": verdict.reason,
+				"fields": sorted((env.payload or {}).keys()),
+			}
+		else:
+			mapping = _resolve_mapping(env.raw, env.event)
+			if not mapping:
+				result = {
+					"kind": envelope.KIND_EVENT,
+					"action": "skipped",
+					"reason": f"no inbound mapping for event '{env.event}'",
+				}
+			else:
+				decision = plan_inbound(mapping, env.raw)
+				result = {
+					"kind": envelope.KIND_EVENT,
+					"mapping": mapping.name,
+					"doctype": decision.doctype,
+					"key_field": decision.key_field,
+					"key_value": decision.key_value,
+					"action": decision.action,
+					"existing": decision.existing,
+					"reason": decision.reason,
+					"fields": sorted(decision.payload.keys()),
+				}
+	except Exception as exc:
+		_close(log, "Failed", error=frappe.get_traceback()[:4000])
+		frappe.db.commit()
+		return _respond(
+			200,
+			ok=True,
+			status="dry_run",
+			dry_run=True,
+			event=env.event,
+			event_id=event_id,
+			result={"action": "error", "reason": str(exc)},
+		)
+
+	_close(log, "Skipped", action="skipped")
+	frappe.db.commit()
+	return _respond(
+		200, ok=True, status="dry_run", dry_run=True, event=env.event, event_id=event_id, result=result
+	)
 
 
 # ── kind: mapping ────────────────────────────────────────────────────
@@ -456,8 +533,27 @@ def _resolve_mapping(envelope_raw: dict, event: str):
 	return None
 
 
-def apply_inbound(mapping, envelope_raw: dict) -> dict:
-	"""Create, update or delete one document from an inbound envelope."""
+@dataclass
+class InboundPlan:
+	"""What an inbound envelope would do, before anything does it.
+
+	Split out so the studio can rehearse the real rule instead of a copy
+	of it. A dry run that reasons independently is worse than no dry run,
+	because it is believed: the two would agree for a fortnight and then
+	quietly stop agreeing.
+	"""
+
+	action: str  # created | updated | deleted | skipped
+	doctype: str
+	key_field: str
+	key_value: object = None
+	payload: dict = field(default_factory=dict)
+	existing: str | None = None
+	reason: str | None = None
+
+
+def plan_inbound(mapping, envelope_raw: dict) -> InboundPlan:
+	"""Decide what would happen. Reads the database; writes nothing."""
 	data = envelope_raw.get("data") or {}
 	key_field = (envelope_raw.get("key_field") or mapping.key_field or "name").strip()
 	key_value = envelope_raw.get("key_value") or data.get(key_field)
@@ -482,37 +578,69 @@ def apply_inbound(mapping, envelope_raw: dict) -> dict:
 		else:
 			existing = frappe.db.get_value(mapping.document_type, {key_field: key_value}, "name")
 
+	def plan(action, existing_name=existing, reason=None):
+		return InboundPlan(
+			action=action,
+			doctype=mapping.document_type,
+			key_field=key_field,
+			key_value=key_value,
+			payload=payload,
+			existing=existing_name,
+			reason=reason,
+		)
+
 	# Same guard as the mapped path, one level down, because a generic
 	# mapping can carry a delete straight into frappe.delete_doc.
 	verdict = catalogue.guard(
 		mapping.document_type, key_field, key_value, envelope_raw.get("event")
 	)
 	if verdict.blocked:
-		return {"status": "Skipped", "reason": verdict.reason, "name": verdict.document}
+		return plan("skipped", verdict.document or existing, verdict.reason)
 
 	if envelope_raw.get("event", "").endswith(".deleted"):
 		if not mapping.allow_delete:
-			return {"status": "Skipped", "reason": "delete not permitted by mapping"}
+			return plan("skipped", reason="delete not permitted by mapping")
 		if not existing:
-			return {"status": "Skipped", "reason": "already absent"}
-		frappe.delete_doc(mapping.document_type, existing, ignore_permissions=True)
-		return {"status": "Success", "action": "deleted", "name": existing}
+			return plan("skipped", reason="already absent")
+		return plan("deleted")
 
 	if existing:
 		if not may_update:
-			return {"status": "Skipped", "reason": "update not permitted"}
-		doc = frappe.get_doc(mapping.document_type, existing)
-		doc.update(payload)
+			return plan("skipped", reason="update not permitted")
+		return plan("updated")
+
+	if not may_create:
+		return plan("skipped", reason="create not permitted")
+	return plan("created", existing_name=None)
+
+
+def apply_inbound(mapping, envelope_raw: dict) -> dict:
+	"""Carry out what `plan_inbound` decided.
+
+	Deliberately thin. Every question — may it, does it exist, what does
+	the field map carry, does the catalogue guard allow it — is answered
+	one function up, where the studio can ask the same question without
+	the answer being acted on.
+	"""
+	decision = plan_inbound(mapping, envelope_raw)
+
+	if decision.action == "skipped":
+		return {"status": "Skipped", "reason": decision.reason, "name": decision.existing}
+
+	if decision.action == "deleted":
+		frappe.delete_doc(decision.doctype, decision.existing, ignore_permissions=True)
+		return {"status": "Success", "action": "deleted", "name": decision.existing}
+
+	if decision.action == "updated":
+		doc = frappe.get_doc(decision.doctype, decision.existing)
+		doc.update(decision.payload)
 		doc.save(ignore_permissions=True)
 		return {"status": "Success", "action": "updated", "name": doc.name}
 
-	if not may_create:
-		return {"status": "Skipped", "reason": "create not permitted"}
-
-	doc = frappe.new_doc(mapping.document_type)
-	doc.update(payload)
-	if key_field != "name" and key_value:
-		doc.set(key_field, key_value)
+	doc = frappe.new_doc(decision.doctype)
+	doc.update(decision.payload)
+	if decision.key_field != "name" and decision.key_value:
+		doc.set(decision.key_field, decision.key_value)
 	doc.insert(ignore_permissions=True)
 	if mapping.submit_on_insert and doc.meta.is_submittable:
 		doc.submit()

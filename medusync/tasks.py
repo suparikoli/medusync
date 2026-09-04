@@ -9,13 +9,29 @@ from frappe.utils import add_days, now_datetime
 from medusync import config, envelope, outbound
 
 
+#: Rehearsals are kept just long enough to read the result. Nobody
+#: audits a dry run a fortnight later, and they are the noisiest rows in
+#: the table while somebody is building a mapping.
+TEST_RETENTION_DAYS = 1
+
+
 def prune_logs():
 	"""Delete Medusync Log rows past the configured retention.
 
 	Sync logs contain whatever fields the mapping carries, which on a
 	Customer mapping means personal data. Keeping them forever turns the
 	log table into a second, unmanaged copy of it.
+
+	Rehearsals go first and go regardless: they are not evidence of
+	anything, and a site that turned retention off should not accumulate
+	them forever.
 	"""
+	frappe.db.delete(
+		"Medusync Log",
+		{"is_test": 1, "creation": ("<", add_days(now_datetime(), -TEST_RETENTION_DAYS))},
+	)
+	frappe.db.commit()
+
 	try:
 		days = int(config.settings().log_retention_days or 0)
 	except Exception:
@@ -49,6 +65,10 @@ def retry_due(limit: int = 200):
 			["status", "=", "Queued"],
 			["next_attempt_at", "is", "set"],
 			["next_attempt_at", "<=", now_datetime()],
+			# A rehearsal that failed is information, not a delivery owed
+			# to anyone. Retrying one would send a fabricated payload for
+			# real, which is the opposite of what a dry run is for.
+			["is_test", "=", 0],
 		],
 		fields=["name", "event", "event_id", "request_body", "attempt", "site"],
 		order_by="next_attempt_at asc",

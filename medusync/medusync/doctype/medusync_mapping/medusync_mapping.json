@@ -29,6 +29,12 @@
   "column_break_in",
   "allow_delete",
   "submit_on_insert",
+  "testing_section",
+  "last_test_status",
+  "last_test_at",
+  "column_break_testing",
+  "tested_signature",
+  "last_test_report",
   "identity_section",
   "mapping_uid",
   "column_break_identity",
@@ -231,6 +237,47 @@
    "fieldname": "last_synced_at",
    "fieldtype": "Datetime",
    "label": "Last Synced At",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "testing_section",
+   "fieldtype": "Section Break",
+   "label": "Rehearsal",
+   "description": "A mapping goes live only after somebody has seen it work. Use Test in the toolbar: it shows what would be sent and what an arriving payload would do, writes nothing, and switches the mapping on if it held up."
+  },
+  {
+   "default": "Untested",
+   "fieldname": "last_test_status",
+   "fieldtype": "Select",
+   "label": "Last Rehearsal",
+   "options": "Untested\nPassed\nFailed",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "last_test_at",
+   "fieldtype": "Datetime",
+   "label": "Rehearsed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_testing",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tested_signature",
+   "fieldtype": "Data",
+   "label": "Rehearsed Signature",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Fingerprint of what this mapping does — doctype, direction, key and field map. Changing any of those means the rehearsal no longer describes it; changing the title or ticking Enabled does not."
+  },
+  {
+   "fieldname": "last_test_report",
+   "fieldtype": "Code",
+   "label": "Rehearsal Report",
+   "options": "JSON",
    "read_only": 1,
    "no_copy": 1
   }

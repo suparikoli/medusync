@@ -67,6 +67,7 @@ def build(
 	allow_create: bool = True,
 	allow_update: bool = True,
 	ts: int | None = None,
+	dry_run: bool = False,
 ) -> dict:
 	"""Compose an outbound envelope. Only the keys the `kind` needs are set."""
 	env = {
@@ -86,6 +87,10 @@ def build(
 	}
 	if echo_of:
 		env["origin"]["echo_of"] = echo_of
+	if dry_run:
+		# Only present when true, so a v1 receiver that ignores unknown
+		# keys is unaffected and an ordinary envelope is unchanged.
+		env["dry_run"] = True
 	if kind == KIND_MAPPED:
 		env.update(
 			{
@@ -122,6 +127,7 @@ class Envelope:
 		"origin_site_id",
 		"correlation_id",
 		"echo_of",
+		"dry_run",
 		"data",
 		"doctype",
 		"key_field",
@@ -181,6 +187,7 @@ def parse(raw: dict) -> Envelope:
 		origin_site_id=origin.get("site_id"),
 		correlation_id=origin.get("correlation_id"),
 		echo_of=origin.get("echo_of"),
+		dry_run=bool(raw.get("dry_run")),
 		data=raw.get("data") if raw.get("data") is not None else raw.get("doc"),
 		doctype=(raw.get("doctype") or "").strip() or None,
 		key_field=(raw.get("key_field") or "").strip() or None,

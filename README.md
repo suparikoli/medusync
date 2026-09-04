@@ -339,6 +339,70 @@ A refusal comes back as a **skip**, not a failure, so the sender records
 "nothing to do" and stops. Returning an error would put the event into a
 retry loop that could never succeed.
 
+## Trying a mapping before you trust it
+
+A mapping is a small program somebody types into a grid, and until now the
+only feedback it gave was a log row after a real document was saved. That
+is a poor place to discover a wrong field name and a worse one to discover
+a condition that excludes everything.
+
+Open a **Medusync Mapping** and use **Test**:
+
+| Button | Does |
+|---|---|
+| Show a Sample Record | a real record of that DocType, or one made up from the form's own definition when the site has none |
+| Rehearse | both directions, reported, nothing written |
+| Rehearse and Enable | the same, and switches the mapping on if it held up |
+| Send a Test Event | a real signed request to every store, which checks it and answers without writing |
+
+**Leaving here** reports the payload that would travel, the events that
+would fire, which stores would receive it, and whether the condition
+passes. A mapping that is enabled, valid and silent is the hardest fault
+to see from outside, so "no document events selected", "the condition
+excludes this record" and "every store is excluded" are named rather than
+left for somebody to notice later.
+
+**Arriving here** reports whether the payload would create or update, the
+field-by-field difference, and anything ERPNext itself would object to.
+It runs the doctype's own validation inside a savepoint that is always
+rolled back, so a mandatory field or a bad Select shows up here instead of
+as a queue of failures.
+
+Both halves ask the same code the real paths ask: outbound uses the same
+payload builder and the same condition and selection checks, inbound uses
+the same plan `apply_inbound` executes. A studio that reasons
+independently is worse than none, because it is believed.
+
+### Enable after a rehearsal
+
+Switching a mapping **on** requires a rehearsal that matches it. What
+counts as "matches" is a signature over what the mapping *does* — DocType,
+direction, key, field map — so a pass survives ticking Enabled and does
+not survive somebody adding a field afterwards. Renaming it costs nothing.
+
+Only the transition is gated. A mapping already running keeps running
+whatever is edited on it; retro-fitting the rule would stop a working site
+on the next save of anything.
+
+The far side cannot switch on a mapping this site has not rehearsed. It
+arrives, its fields are applied, and `Enabled` stays off — the same rule
+as first contact. It is refused quietly rather than with an error, because
+an error would put the sender into a retry loop.
+
+### Test rows
+
+A test event is real traffic with `dry_run` in the envelope: signed,
+inside the replay window, checked by the far side, and stopped before the
+write. That is the only check that can prove the shared secret, the
+network and the far side's own verdict, which between them are most of the
+reasons a sync fails.
+
+The rows it leaves are marked **Test Run**, and everything that reads the
+log skips them: the retry sweep will not retry one, a rehearsed success
+never suppresses a genuine event as a duplicate, and a rehearsal does not
+count as having reached a store. They are pruned after a day whatever the
+retention setting says.
+
 ## Loop prevention
 
 An inbound write is an ordinary document save, so it would fire the

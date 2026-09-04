@@ -26,7 +26,7 @@ def _mapping(title, **kw):
 	doc.update(
 		{
 			"title": title,
-			"enabled": 1,
+			"enabled": 0,
 			"document_type": kw.pop("document_type", "Customer"),
 			"direction": kw.pop("direction", "Two-way"),
 			"key_field": kw.pop("key_field", "email_id"),
@@ -38,6 +38,16 @@ def _mapping(title, **kw):
 	for row in fields:
 		doc.append("field_map", row)
 	doc.insert(ignore_permissions=True)
+	# Switching a mapping on now needs a rehearsal that matches it (see
+	# medusync.studio). These fixtures are not about that gate, so they
+	# record a pass for the shape they just built and set the flag straight
+	# in the table — saving again would bump `version`, which one of these
+	# tests checks.
+	from medusync import studio
+
+	studio.record_result(doc.name, passed=True, report="fixture")
+	frappe.db.set_value("Medusync Mapping", doc.name, "enabled", 1, update_modified=False)
+	doc.reload()
 	return doc
 
 

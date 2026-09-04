@@ -151,16 +151,8 @@ def dispatch(mapping, doc, docevent: str):
 		# Medusa side. The site id keeps two sites' rows distinct.
 		event_id = f"frappe:{doc.doctype}:{doc.name}:{doc.get('modified') or now_datetime()}:{site_id}"
 
-		if mapping.get("skip_unchanged") and frappe.db.exists(
-			"Medusync Log",
-			{
-				"direction": "Outbound",
-				"document_type": doc.doctype,
-				"document_name": doc.name,
-				"payload_hash": payload_hash,
-				"status": "Success",
-				"site": site_id,
-			},
+		if mapping.get("skip_unchanged") and already_delivered(
+			doctype=doc.doctype, docname=doc.name, payload_hash=payload_hash, site_id=site_id
 		):
 			continue
 
@@ -186,6 +178,27 @@ def dispatch(mapping, doc, docevent: str):
 		)
 
 
+def already_delivered(*, doctype, docname, payload_hash: str, site_id: str) -> bool:
+	"""Has this exact payload already reached this store?
+
+	Rehearsals are excluded on purpose. A test run must never be the
+	reason a genuine change is dropped as a duplicate — that failure is
+	invisible from both ends, which is the worst kind.
+	"""
+	filters = {
+		"direction": "Outbound",
+		"payload_hash": payload_hash,
+		"status": "Success",
+		"site": site_id,
+		"is_test": 0,
+	}
+	if doctype:
+		filters["document_type"] = doctype
+	if docname:
+		filters["document_name"] = docname
+	return bool(frappe.db.exists("Medusync Log", filters))
+
+
 def send(
 	log_name: str,
 	event_name: str,
@@ -196,6 +209,7 @@ def send(
 	kind: str = envelope.KIND_EVENT,
 	correlation_id: str | None = None,
 	echo_of: str | None = None,
+	is_test: bool = False,
 ):
 	"""Hand one logged event to the delivery channel.
 
@@ -215,6 +229,7 @@ def send(
 		kind=kind,
 		correlation_id=correlation_id,
 		echo_of=echo_of,
+		is_test=is_test,
 	)
 	if cfg.use_background_jobs:
 		frappe.enqueue("medusync.outbound.deliver", queue=QUEUE, enqueue_after_commit=True, **kwargs)
@@ -230,6 +245,7 @@ def emit(
 	doctype: str | None = None,
 	docname: str | None = None,
 	per_site=None,
+	is_test: bool = False,
 ):
 	"""Log and send one event to every enabled site.
 
@@ -266,6 +282,10 @@ def emit(
 			json.dumps(body, sort_keys=True, default=str).encode("utf-8")
 		).hexdigest()
 		event_id = "frappe:%s:%s:%s" % (event, ref, site_id)
+		if is_test:
+			# Marked in the id as well as the column so it is obvious in a
+			# log listing, in a retry queue and on the far side at once.
+			event_id = "test:" + event_id
 		log = _create_log(
 			direction="Outbound",
 			status="Queued",
@@ -275,6 +295,7 @@ def emit(
 			document_name=docname,
 			payload_hash=payload_hash,
 			site=site_id,
+			is_test=1 if is_test else 0,
 			request_body=body,
 		)
 		send(
@@ -285,6 +306,7 @@ def emit(
 			site_id=site_id,
 			correlation_id=mark.get("correlation_id"),
 			echo_of=mark.get("origin"),
+			is_test=is_test,
 		)
 
 
@@ -351,6 +373,7 @@ def deliver(
 	kind: str = envelope.KIND_EVENT,
 	correlation_id: str | None = None,
 	echo_of: str | None = None,
+	is_test: bool = False,
 ):
 	"""POST one event to one site and record the outcome.
 
@@ -398,6 +421,9 @@ def deliver(
 		kind=kind,
 		correlation_id=correlation_id,
 		echo_of=echo_of,
+		# A rehearsal is always a dry run on the wire. The far side does
+		# every check it would normally do and stops before the write.
+		dry_run=is_test,
 		**body_kwargs,
 	)
 	body = json.dumps(env, separators=(",", ":"), default=str).encode("utf-8")
@@ -447,7 +473,7 @@ def deliver(
 			# terminal now, so honour "don't log bodies".
 			fields["request_body"] = None
 		_finish_log(log_name, **fields)
-		_mark_site_seen(site["site_id"])
+		_mark_site_seen(site["site_id"], is_test=is_test)
 		return
 
 	_retry_or_fail(
@@ -516,8 +542,14 @@ def _retry_or_fail(
 # ── Site health ──────────────────────────────────────────────────────
 
 
-def _mark_site_seen(site_id):
-	if not site_id:
+def _mark_site_seen(site_id, is_test: bool = False):
+	"""Record that this store answered us.
+
+	A rehearsal does not count. "Last seen" is what an operator reads to
+	decide whether a store is reachable, and a green test run says only
+	that the studio is working.
+	"""
+	if not site_id or is_test:
 		return
 	try:
 		frappe.db.set_value(

@@ -10,6 +10,7 @@
   "column_break_head",
   "event",
   "event_id",
+  "is_test",
   "site",
   "ref_section",
   "document_type",
@@ -151,6 +152,15 @@
    "fieldname": "error",
    "fieldtype": "Small Text",
    "label": "Error"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_test",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Test Run",
+   "read_only": 1,
+   "description": "This row is a rehearsal from the mapping studio, not real traffic. The retry sweep skips it, it never suppresses a genuine event as a duplicate, it does not count as reaching the store, and it is pruned within a day."
   }
  ],
  "in_create": 1,
