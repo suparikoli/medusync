@@ -28,6 +28,7 @@
   "selection_section",
   "products_doctype",
   "allow_medusa_catalogue_updates",
+  "defaults_version",
   "column_break_selection",
   "selection_doctypes"
  ],
@@ -193,6 +194,14 @@
    "fieldtype": "Check",
    "label": "Medusa May Update Catalogue Fields",
    "description": "Off by default: ERPNext owns the catalogue, so an inbound change to a record that already exists here is skipped rather than applied. Turn it on only where the storefront is genuinely the better source for those fields. It never licenses deletion — a Medusa product delete always unlinks the record and leaves it, its stock and its history untouched."
+  },
+  {
+   "default": "0",
+   "fieldname": "defaults_version",
+   "fieldtype": "Int",
+   "label": "Default Mappings Version",
+   "read_only": 1,
+   "description": "Which shipped mapping set this site has. Written when the defaults are restored; 0 means they have never been installed. The defaults arrive switched off, so restoring them never changes what the site does until somebody rehearses and enables each one."
   }
  ],
  "issingle": 1,

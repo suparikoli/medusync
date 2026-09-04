@@ -62,6 +62,22 @@ def origin_of(doctype: str, name: str) -> dict | None:
 	return value or None
 
 
+def forget_all() -> None:
+	"""Drop every breadcrumb on this site.
+
+	Only a reset needs this. They expire on their own in three minutes, so
+	the point is not reclaiming space: it is that a reset should not leave
+	the next few pushes suppressed as echoes of a configuration that no
+	longer exists.
+	"""
+	try:
+		frappe.cache().delete_keys("medusync:echo:")
+	except Exception:
+		# Same reasoning as remember(): a cache outage must never turn a
+		# reset into a failure. The breadcrumbs expire regardless.
+		pass
+
+
 def forget(doctype: str, name: str) -> None:
 	try:
 		frappe.cache().delete_value(_key(doctype, name))

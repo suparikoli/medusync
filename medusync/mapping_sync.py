@@ -233,6 +233,12 @@ def on_mapping_update(doc, method=None):
 	config.clear_mapping_cache()
 	if doc.flags.get("medusync_applying"):
 		return
+	# A reset is rewriting these on both sides at once. If each side
+	# pushed its copy the two would collide on version, and the conflict
+	# rule would then pick a winner nobody asked for. The cache refresh
+	# above still has to happen: the mappings really did change.
+	if frappe.flags.get("medusync_reset"):
+		return
 	try:
 		push_mapping(doc)
 	except Exception:

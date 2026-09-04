@@ -403,6 +403,59 @@ never suppresses a genuine event as a duplicate, and a rehearsal does not
 count as having reached a store. They are pruned after a day whatever the
 retention setting says.
 
+## The mappings this app ships with
+
+Three, because three is what a store needs before anything else is worth
+configuring: **Customers**, **Catalogue** and **Orders**. They carry fixed
+identifiers (`default:customer` and friends) so both systems agree which
+mapping is which without asking each other, and the catalogue one follows
+whatever **Medusync Settings → Catalogue DocType** says.
+
+They arrive switched off, always. A mapping goes live only after a
+rehearsal that matches it, and that rule is exactly what makes restoring
+them safe: the configuration comes back without changing what the site
+does until somebody has looked at each one.
+
+`Medusync Settings → Default Mappings Version` records which set is
+installed. Applying a *newer* set to a site that has edited the old one is
+a harder problem — it has to decide what "edited" means — and is not what
+restoring does.
+
+## Hard reset
+
+A reset throws away configuration somebody spent a week getting right, so
+the question worth answering is not what it does but who may ask. Nobody,
+alone.
+
+Open the **Medusync Site** and use **Danger Zone → Hard Reset**. Each
+system generates a secret and shows it once; each has to be handed the
+other's. A secret is 32 random bytes, lives three minutes, works once, and
+is stored only as a hash — the receiver redacts the body of a verify
+before it writes its audit row, whatever the payload-logging setting says.
+A secret that reaches a log has a much longer life than three minutes.
+
+Only a side holding both proofs resets: the far side proved it holds ours,
+and we proved we hold theirs.
+
+| | |
+|---|---|
+| **Keeps** | every business document, and every `medusa_*` id on it |
+| | `Medusync Site` records and both their secrets |
+| | the Don't Sync list, and the warehouse and price-list maps |
+| **Restores** | the three shipped mappings, switched off |
+| **Switches off** | every other mapping — kept, not deleted |
+| **Clears** | `Medusync Log`, and the loop-prevention breadcrumbs |
+
+Keeping the cross-system ids is the important one. A reset that took
+`medusa_customer_id` with it would leave both systems holding the same
+customers and no longer knowing it, which is worse than the configuration
+mistake anyone was trying to fix. Keeping the store's secrets means
+recovering from a bad configuration does not also mean re-pairing. Keeping
+exclusions means the reset cannot quietly resume syncing a document
+somebody deliberately stopped.
+
+Afterwards nothing is running. Rehearse and enable what you want back.
+
 ## Loop prevention
 
 An inbound write is an ordinary document save, so it would fire the

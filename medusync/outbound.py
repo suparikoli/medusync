@@ -54,6 +54,7 @@ MEDUSYNC_DOCTYPES = (
 	"Medusync Settings",
 	"Medusync Site",
 	"Medusync Exclusion",
+	"Medusync Reset Request",
 )
 
 

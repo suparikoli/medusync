@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 
 import frappe
 
-from medusync import catalogue, config, echo, envelope, mapping_sync, sites
+from medusync import catalogue, config, echo, envelope, mapping_sync, reset, sites
 from medusync.handlers import dispatch as handlers_dispatch
 from medusync.signing import EVENT_ID_HEADER, SIGNATURE_HEADER, verify
 
@@ -130,6 +130,12 @@ def _receive(default_kind: str | None = None):
 			200, ok=True, status="skipped", message="already applied", event=env.event, event_id=event_id
 		)
 
+	# The other side proving it holds the secret this side generated. A
+	# control message, not business data: it never reaches a mapping, and
+	# its body is redacted before the audit row is written.
+	if env.event == reset.VERIFY_EVENT:
+		return _reset_verify(env, event_id, site_id)
+
 	# A rehearsal from the other side. It has already passed the signature
 	# check, the replay window and the echo test, so a green answer proves
 	# everything except the write — and the write is the only part a dry
@@ -155,7 +161,22 @@ def _origin_ref(env, site_id: str) -> str:
 	return f"{env.origin_system or 'medusa'}:{site_id}"
 
 
-def _new_log(env, event_id: str, site_id: str, doctype=None, is_test: bool = False):
+def _new_log(
+	env, event_id: str, site_id: str, doctype=None, is_test: bool = False, redact: bool = False
+):
+	"""Open the audit row for one inbound message.
+
+	`redact` is not the same as "payload logging is off". A control message
+	carrying a secret must never be written down whatever the setting says,
+	and the row still has to exist, because an attempt on the reset
+	endpoint is exactly the thing somebody would want to see afterwards.
+	"""
+	if redact:
+		body = json.dumps({"redacted": True}, indent=2)
+	elif config.settings().log_payloads:
+		body = json.dumps(env.raw, indent=2, default=str)
+	else:
+		body = None
 	log = frappe.new_doc("Medusync Log")
 	log.update(
 		{
@@ -166,13 +187,46 @@ def _new_log(env, event_id: str, site_id: str, doctype=None, is_test: bool = Fal
 			"is_test": 1 if is_test else 0,
 			"document_type": doctype,
 			"site": site_id if frappe.db.exists(sites.SITE_DOCTYPE, site_id) else None,
-			"request_body": json.dumps(env.raw, indent=2, default=str)
-			if config.settings().log_payloads
-			else None,
+			"request_body": body,
 		}
 	)
 	log.insert(ignore_permissions=True)
 	return log
+
+
+# ── Resets ───────────────────────────────────────────────────────────
+
+
+def _reset_verify(env, event_id: str, site_id: str):
+	"""The store is claiming to hold the secret we generated.
+
+	Answers 200 either way. A refusal is a fact about the secret, not a
+	transport failure, and telling the sender to retry would hand an
+	attacker unlimited attempts inside the window.
+	"""
+	log = _new_log(env, event_id, site_id, doctype=None, redact=True)
+	secret = (env.data or {}).get("secret") if isinstance(env.data, dict) else None
+	try:
+		result = reset.verify_local(secret)
+	except Exception:
+		# Deliberately not `frappe.get_traceback()`: a traceback here could
+		# quote the argument.
+		_close(log, "Failed", error="reset verification raised")
+		frappe.db.commit()
+		return _respond(
+			200, ok=True, status="failed", event=env.event, result={"ok": False, "reason": "error"}
+		)
+
+	_close(log, "Success" if result.get("ok") else "Skipped", action="updated" if result.get("ok") else "skipped")
+	frappe.db.commit()
+	return _respond(
+		200,
+		ok=True,
+		status="success" if result.get("ok") else "skipped",
+		event=env.event,
+		event_id=event_id,
+		result=result,
+	)
 
 
 # ── Rehearsals ───────────────────────────────────────────────────────

@@ -1,0 +1,151 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-09-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "site",
+  "status",
+  "column_break_head",
+  "expires_at",
+  "completed_at",
+  "handshake_section",
+  "local_verified_at",
+  "column_break_handshake",
+  "remote_confirmed_at",
+  "secret_section",
+  "secret_hash",
+  "used_at",
+  "report_section",
+  "reset_report",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The store this reset is between. A reset is per store: one connected Medusa can be reset without touching another.",
+   "fieldname": "site",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Site",
+   "options": "Medusync Site",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nVerified\nCompleted\nExpired\nCancelled\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Three minutes from when the secret was shown. After this the request is dead and a new one has to be asked for.",
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Expires At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "label": "Completed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "handshake_section",
+   "fieldtype": "Section Break",
+   "label": "Both Hands On The Switch",
+   "description": "A reset needs both. Neither system can reset itself, and neither can reset the other: each generates a secret, shows it once, and has to be handed the other's."
+  },
+  {
+   "description": "Set when the store proved it holds the secret this side generated.",
+   "fieldname": "local_verified_at",
+   "fieldtype": "Datetime",
+   "label": "They Proved They Hold Ours",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_handshake",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Set when this side proved to the store that it holds the store's secret.",
+   "fieldname": "remote_confirmed_at",
+   "fieldtype": "Datetime",
+   "label": "We Proved We Hold Theirs",
+   "read_only": 1
+  },
+  {
+   "fieldname": "secret_section",
+   "fieldtype": "Section Break",
+   "label": "Secret",
+   "collapsible": 1,
+   "description": "The secret itself is shown once, when the request is made, and is never stored or written to any log. Only this hash of it is kept."
+  },
+  {
+   "fieldname": "secret_hash",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Secret Hash",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "description": "When the secret was spent. A secret works once.",
+   "fieldname": "used_at",
+   "fieldtype": "Datetime",
+   "label": "Used At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "report_section",
+   "fieldtype": "Section Break",
+   "label": "What Happened"
+  },
+  {
+   "fieldname": "reset_report",
+   "fieldtype": "Code",
+   "label": "Reset Report",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Medusync",
+ "name": "Medusync Reset Request",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
