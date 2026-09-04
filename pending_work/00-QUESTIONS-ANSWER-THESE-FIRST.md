@@ -213,6 +213,51 @@ computed as `erp_payments_total`, ignores credit terms entirely
 
 > **Answer:**
 
+### The mapping editor — `2026-09-07-mapping-studio-parity.md`, `2026-09-07-medusa-field-discovery.md`
+
+**Q27. How close to n8n do you want the mapper?**
+Neither side is a two-panel drag-and-drop today: Medusa has a real editor
+with a field-pair grid, ERPNext has a DocType form with studio buttons.
+(a) ★ Show each row's currently-resolved value first — small, and removes
+most of the typing-blind problem — then decide whether the two-panel
+layout is still worth it
+(b) Build the two-panel drag mapper properly, both sides
+(c) Leave it; the grid plus Sample is enough
+
+> **Answer:**
+
+**Q28. ERPNext's mapper is a DocType form and cannot host a two-panel
+layout. Replace it with a Frappe Page?**
+It means giving up the free things a DocType form provides: permissions,
+version history, list views, filters.
+(a) ★ Only if Q27 lands on (b) — otherwise the form plus buttons is the
+better trade
+(b) Yes regardless; the editor deserves a purpose-built page
+(c) No
+
+> **Answer:**
+
+**Q29. Where should Medusa's field list come from?**
+It is a hand-curated `paths` array per entity today, so a field nobody
+listed is invisible in the picker, and a Medusa upgrade that adds a column
+adds nothing here. ERPNext's equivalent is read live from `get_meta`.
+(a) Keep curating, and add a test that reports fields present in real data
+but missing from the list
+(b) ★ Derive from the model definition at runtime, falling back to walking
+a real record when a model has no rows, keeping the curated list only for
+labels and suggested transforms
+(c) Derive from a real record only
+
+> **Answer:**
+
+**Q30. Nobody can currently answer "who changed this mapping field, and to
+what" on the Medusa side.** ERPNext has Frappe's document version history;
+Medusa keeps only `version` and `updated_by_user_id`. Worth an edit log?
+(a) ★ Yes — a small revisions table on `erpnext_mapping`, written on save
+(b) No — the mapping syncs to ERPNext, which does keep history
+
+> **Answer:**
+
 ---
 
 ## B. Decisions about what is already built
