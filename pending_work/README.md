@@ -11,3 +11,8 @@ Rules:
 - This folder is tracked in git on purpose. Never add it to `.gitignore`.
 - When an item ships, delete its file in the same PR (the PR description links
   the file's last revision).
+
+There is one file that is not a topic: `00-QUESTIONS-ANSWER-THESE-FIRST.md`.
+Every topic here is blocked on a decision in it, so it sorts to the top of
+the folder on purpose. Answering a question there unblocks the topic that
+cites it.

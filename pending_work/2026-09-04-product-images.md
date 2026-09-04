@@ -49,3 +49,17 @@ differs in kind from everything else. Adding a file transfer to Phase 3 would
 have meant either re-uploading on every save or a half-built change check, and
 multi-warehouse stock and the catalogue guard were the things that were actively
 wrong today.
+
+## Questions this is waiting on
+
+See `00-QUESTIONS-ANSWER-THESE-FIRST.md`.
+
+- **Q14** — who moves the bytes, ERPNext pushing or Medusa pulling.
+- **Q15** — what happens to a private ERPNext file, which is not fetchable
+  without a session.
+- **Q16** — what counts as a change, since re-uploading every image on
+  every Item save is ruinous.
+- **Q17** — which image is the primary and whether the others sync at all.
+
+Q14 and Q15 together decide the mechanism; Q16 decides whether it is
+affordable; Q17 is the smallest of the four.

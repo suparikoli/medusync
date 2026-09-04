@@ -52,3 +52,21 @@ many lists with different meanings at different stores. The direction field is
 the configuration that makes an inbound path *possible*; the path itself wants
 the Phase 4 test studio first, because a wrong price landing in ERPNext is
 expensive in a way a wrong stock level is not.
+
+## Questions this is waiting on
+
+See `00-QUESTIONS-ANSWER-THESE-FIRST.md`.
+
+- **Q10** — which ERPNext Price List a price coming back from Medusa belongs
+  to. There is no obvious answer: Medusa has no concept of the list it came
+  from once the price is stored.
+- **Q11** — what happens to a Medusa tier price, which has no quantity
+  bracket, when ERPNext tiers are defined by one.
+- **Q12** — how much rounding tolerance the echo guard allows, since a
+  price crossing to minor units and back may not compare equal.
+- **Q13** — whether an inbound price may create an Item Price or only
+  update one that exists.
+
+All four have to be answered together: they are one design. A wrong price
+landing in ERPNext is expensive in a way a wrong stock level is not, which
+is why none of it was guessed at.
