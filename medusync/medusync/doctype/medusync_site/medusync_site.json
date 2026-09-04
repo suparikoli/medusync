@@ -22,7 +22,6 @@
   "behaviour_section",
   "handler_pack",
   "column_break_behaviour",
-  "products_doctype",
   "health_section",
   "last_seen_at",
   "column_break_health",
@@ -122,7 +121,8 @@
   {
    "fieldname": "behaviour_section",
    "fieldtype": "Section Break",
-   "label": "Behaviour"
+   "label": "Behaviour",
+   "description": "Which handler pack serves this store. The catalogue DocType is a global setting, not a per-store one."
   },
   {
    "description": "Domain handler pack serving this site, when it needs one beyond the generic mapping engine. Blank uses the packs configured for the whole site in site_config.json.",
@@ -133,14 +133,6 @@
   {
    "fieldname": "column_break_behaviour",
    "fieldtype": "Column Break"
-  },
-  {
-   "default": "Item",
-   "description": "DocType this site treats as its product catalogue. Changing it moves the per-document sync selector onto the new doctype.",
-   "fieldname": "products_doctype",
-   "fieldtype": "Link",
-   "label": "Products DocType",
-   "options": "DocType"
   },
   {
    "fieldname": "health_section",

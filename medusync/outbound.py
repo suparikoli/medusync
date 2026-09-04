@@ -42,13 +42,19 @@ import json
 import frappe
 from frappe.utils import add_to_date, now_datetime
 
-from medusync import config, echo, envelope, sites
+from medusync import config, echo, envelope, selection, sites
 from medusync.signing import EVENT_ID_HEADER, SIGNATURE_HEADER, sign
 
 QUEUE = "short"
 
 #: Our own doctypes never sync — configuring the sync must not emit sync.
-MEDUSYNC_DOCTYPES = ("Medusync Log", "Medusync Mapping", "Medusync Settings", "Medusync Site")
+MEDUSYNC_DOCTYPES = (
+	"Medusync Log",
+	"Medusync Mapping",
+	"Medusync Settings",
+	"Medusync Site",
+	"Medusync Exclusion",
+)
 
 
 def on_doc_event(doc, method=None):
@@ -72,6 +78,9 @@ def on_doc_event(doc, method=None):
 
 		# Domain packs the site opted into. Nothing here names a doctype;
 		# the registry answers from what the configured packs declare.
+		# Keep the Don't Sync list in step with the document's own selector.
+		selection.on_doc_event(doc, method)
+
 		from medusync import handlers
 
 		handlers.run_outbound_hooks(doc, method)
@@ -130,7 +139,12 @@ def dispatch(mapping, doc, docevent: str):
 	echo_of = mark.get("origin")
 	correlation_id = mark.get("correlation_id")
 
-	for site in sites.sites_for_mapping(mapping):
+	# ERPNext decides which documents may reach which store. A mapping
+	# says the doctype can sync; the selector on the document says whether
+	# this one does, and where.
+	for site in selection.sites_allowed(
+		doc.doctype, doc.name, sites.sites_for_mapping(mapping), doc=doc
+	):
 		site_id = site["site_id"]
 		# `modified` is part of the key so a repeated save produces a new
 		# event, but a retry of the SAME save does not apply twice on the
@@ -222,7 +236,10 @@ def emit(event: str, payload: dict, *, ref: str, doctype: str | None = None, doc
 	payload_hash = hashlib.sha256(
 		json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
 	).hexdigest()
-	for site in sites.all_sites():
+	targets = sites.all_sites()
+	if doctype and docname:
+		targets = selection.sites_allowed(doctype, docname, targets)
+	for site in targets:
 		site_id = site["site_id"]
 		event_id = "frappe:%s:%s:%s" % (event, ref, site_id)
 		log = _create_log(

@@ -212,6 +212,36 @@ side only — **Send All Fields** here, the Medusa event list there — do not
 travel, so a mapping that relies on them needs that part set again on the
 far side.
 
+## Sync selection
+
+ERPNext decides which documents are allowed to sync. A mapping says a
+DocType *can*; the selector on the document says whether this one *does*,
+and to which stores:
+
+| Stores connected | What the document shows |
+|---|---|
+| one | **Sync with Medusa**, a single checkbox |
+| several | **Medusa Sites**, a checkbox per store |
+
+The field that does not apply is hidden rather than removed, so going from
+one store to several never loses what was already chosen.
+
+Which DocTypes carry the selector is **Medusync Settings → Sync
+Selection**. The **Catalogue DocType** (Item on a stock ERPNext) always
+does; list any others alongside it. Changing the catalogue moves the
+selector onto the new DocType and tells every connected store, so the
+plugin's "link to an existing product" search looks in the right place.
+
+Everything excluded is also written to **Medusync Exclusion**, the central
+Don't Sync list, and an entry added there by hand updates the document.
+Two views of one decision: an operator can never be shown a ticked box for
+a document the system refuses to sync. Entries the checkbox created are
+cleaned up by the checkbox; entries a person added are theirs to remove.
+
+Defaults are deliberate. Turning selection on must not silently stop a
+store that was syncing perfectly well, so a document nobody has touched is
+allowed, and an empty store list falls back to the checkbox.
+
 ## Loop prevention
 
 An inbound write is an ordinary document save, so it would fire the

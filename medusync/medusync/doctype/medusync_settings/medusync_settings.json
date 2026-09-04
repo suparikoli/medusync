@@ -24,7 +24,11 @@
   "packs_section",
   "inventory_source_warehouse",
   "column_break_packs",
-  "pricing_selling_price_list"
+  "pricing_selling_price_list",
+  "selection_section",
+  "products_doctype",
+  "column_break_selection",
+  "selection_doctypes"
  ],
  "fields": [
   {
@@ -155,6 +159,32 @@
    "label": "Selling Price List for Medusa",
    "options": "Price List",
    "description": "Item Prices on this list become the Medusa base price. Blank = Standard Selling. Other selling lists sync as B2B tier prices when they carry a Medusa Customer Tier code."
+  },
+  {
+   "fieldname": "selection_section",
+   "fieldtype": "Section Break",
+   "label": "Sync Selection",
+   "description": "ERPNext decides which documents are allowed to sync. Each DocType listed here gets a per-document selector: one checkbox while a single store is connected, a list of stores once there are several."
+  },
+  {
+   "fieldname": "products_doctype",
+   "fieldtype": "Link",
+   "options": "DocType",
+   "default": "Item",
+   "label": "Catalogue DocType",
+   "reqd": 1,
+   "description": "Which DocType holds your products. Item on a stock ERPNext. Changing it moves the selector onto the new DocType and tells every connected store."
+  },
+  {
+   "fieldname": "column_break_selection",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "selection_doctypes",
+   "fieldtype": "Table",
+   "options": "Medusync Selection DocType",
+   "label": "Also Under Selection",
+   "description": "Other DocTypes whose documents carry the selector. The catalogue is always included."
   }
  ],
  "issingle": 1,

@@ -19,3 +19,4 @@ medusync.patches.v1_1.drop_scratch_custom_fields
 medusync.patches.v1_1.install_reference_fields
 medusync.patches.v1_2.create_default_site
 medusync.patches.v1_2.backfill_mapping_identity
+medusync.patches.v1_3.install_sync_selection
