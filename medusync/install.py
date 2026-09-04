@@ -30,3 +30,36 @@ def after_install():
 	settings.flags.ignore_permissions = True
 	settings.save()
 	frappe.db.commit()
+
+
+def after_migrate():
+	"""Runs on every `bench migrate`. Must never raise.
+
+	Applying the shipped defaults and looking for drift are both things an
+	operator wants done on upgrade and neither is worth failing a migrate
+	over. A site that will not migrate because one mapping went stale is a
+	site nobody upgrades.
+	"""
+	from medusync import defaults, drift
+
+	try:
+		if defaults.installed_version() < defaults.DEFAULTS_VERSION:
+			result = defaults.apply_defaults(reason="migrate")
+			touched = len(result["created"]) + len(result["applied"])
+			if touched or result["flagged"]:
+				print(
+					"medusync: default mappings — %s new, %s updated, %s need a decision"
+					% (len(result["created"]), len(result["applied"]), len(result["flagged"]))
+				)
+	except Exception:
+		frappe.log_error(title="medusync could not apply default mappings", message=frappe.get_traceback())
+
+	try:
+		report = drift.run()
+		if report["flagged"]:
+			print(
+				"medusync: %s mapping(s) name a field that no longer exists and have been "
+				"switched off — see the Needs Attention column" % len(report["flagged"])
+			)
+	except Exception:
+		frappe.log_error(title="medusync drift check failed on migrate", message=frappe.get_traceback())

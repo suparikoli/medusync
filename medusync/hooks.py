@@ -11,6 +11,12 @@ required_apps = ["erpnext"]
 
 after_install = "medusync.install.after_install"
 
+# Two things every upgrade should do: bring the shipped mapping set up to
+# date without overwriting anybody's edits, and notice a mapping that has
+# gone stale. Both report rather than raise -- an operator whose site is
+# down after an upgrade does not upgrade again.
+after_migrate = "medusync.install.after_migrate"
+
 # ── Document events ──────────────────────────────────────────────────
 # One wildcard binding, and no business doctype named anywhere in this
 # file. Two runtime questions decide what actually happens on a save:
@@ -63,6 +69,10 @@ scheduler_events = {
 	},
 	"daily": [
 		"medusync.tasks.prune_logs",
+		# A mapping that names a field the DocType no longer has fails
+		# silently: the payload simply stops carrying it. Somebody should
+		# be told before they notice from the wrong end.
+		"medusync.drift.run",
 	],
 }
 

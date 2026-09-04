@@ -7,6 +7,7 @@
  "field_order": [
   "title",
   "enabled",
+  "attention",
   "column_break_head",
   "document_type",
   "medusa_entity",
@@ -30,10 +31,12 @@
   "allow_delete",
   "submit_on_insert",
   "testing_section",
+  "attention_detail",
   "last_test_status",
   "last_test_at",
   "column_break_testing",
   "tested_signature",
+  "shipped_signature",
   "last_test_report",
   "identity_section",
   "mapping_uid",
@@ -280,6 +283,34 @@
    "options": "JSON",
    "read_only": 1,
    "no_copy": 1
+  },
+  {
+   "fieldname": "attention",
+   "fieldtype": "Select",
+   "label": "Needs Attention",
+   "options": "\nMapping Required\nField Missing",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "no_copy": 1,
+   "description": "Set when something needs a decision. Mapping Required: the shipped defaults changed and this one was edited, so it was left alone. Field Missing: it names a field the DocType no longer has, and it has been switched off."
+  },
+  {
+   "depends_on": "attention",
+   "fieldname": "attention_detail",
+   "fieldtype": "Small Text",
+   "label": "What Needs Deciding",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "shipped_signature",
+   "fieldtype": "Data",
+   "label": "Shipped Signature",
+   "read_only": 1,
+   "hidden": 1,
+   "no_copy": 1,
+   "description": "Fingerprint of this mapping as it was installed, for mappings that came from the shipped default set. An upgrade compares it with the current fingerprint: the same means nobody has touched it and the new default may be applied; different means somebody has, and the upgrade says so instead."
   }
  ],
  "links": [],

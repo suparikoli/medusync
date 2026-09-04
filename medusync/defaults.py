@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Mithtech Innovative Solutions PVT LTD and contributors
 # For license information, please see license.txt
 
-"""The mappings this app ships with.
+"""The mappings this app ships with, and what happens when they change.
 
 A hard reset has to put *something* back, and "whatever was there before"
 is not a definition. So the default set is data rather than a migration:
@@ -15,28 +15,37 @@ what was ordered. Everything past that is a per-project decision and
 belongs in a mapping somebody writes.
 
 Nothing ships switched on. A mapping goes live only after a rehearsal
-that matches it (see medusync.studio), and that rule is exactly what
-makes restoring defaults a safe thing to do: a reset puts the
-configuration back without changing what the site *does* until a person
-has looked at each one.
+that matches it (see medusync.studio), and that rule is what makes both
+operations here safe: neither restoring nor upgrading changes what a site
+*does* until a person has looked.
 
-Scope note: this module restores. Applying a *newer* default set to an
-installation that has edited the old one is a different and harder
-problem — it has to decide what "edited" means and what to do about it —
-and it belongs with the backward-compatibility work, not here.
+Two operations, and the difference between them is the whole point:
+
+    restore_defaults()   put them back exactly as they ship. A reset.
+    apply_defaults()     ship a NEWER set to a site that has been running.
+
+The second is the hard one, because the brief is explicit that new
+defaults must never auto-replace what somebody configured — which needs a
+definition of "somebody configured it". There already is one: the
+signature over what a mapping does, the same fingerprint the enable gate
+and the studio use. `shipped_signature` records what a default looked like
+when we wrote it. A default whose signature still matches has never been
+touched and is ours to update. One that differs was edited, and the
+upgrade says so instead of overwriting it.
 """
 
 import frappe
 
 from medusync import config
+from medusync.attention import MAPPING_REQUIRED, clear, flag, notify_attention
 
 #: Bump when the set below changes in a way an existing site should hear
 #: about. Recorded on Medusync Settings so an upgrade can tell whether
 #: this site has seen the current set.
 DEFAULTS_VERSION = 1
 
-#: Every default id starts with this. It is what tells a restore which
-#: mappings it owns and which belong to somebody else.
+#: Every default id starts with this. It is what tells a restore and an
+#: upgrade which mappings they own and which belong to somebody else.
 UID_PREFIX = "default:"
 
 DEFAULT_CATALOGUE_DOCTYPE = "Item"
@@ -63,6 +72,7 @@ def default_mappings() -> list[dict]:
 	is assigned over there, so it can only ever travel one way.
 	"""
 	catalogue = _catalogue_doctype()
+	catalogue_key = "item_code" if catalogue == DEFAULT_CATALOGUE_DOCTYPE else "name"
 	return [
 		{
 			"uid": UID_PREFIX + "customer",
@@ -90,18 +100,14 @@ def default_mappings() -> list[dict]:
 			"document_type": catalogue,
 			"medusa_entity": "product",
 			"direction": "To Medusa",
-			"key_field": "item_code" if catalogue == DEFAULT_CATALOGUE_DOCTYPE else "name",
+			"key_field": catalogue_key,
 			"docevents": ["after_insert", "on_update"],
 			"enabled": 0,
 			"allow_insert": 0,
 			"allow_update": 0,
 			"allow_delete": 0,
 			"fields": [
-				(
-					"item_code" if catalogue == DEFAULT_CATALOGUE_DOCTYPE else "name",
-					"handle",
-					"To Medusa",
-				),
+				(catalogue_key, "handle", "To Medusa"),
 				("item_name", "title", "To Medusa"),
 				("description", "description", "To Medusa"),
 				("medusa_product_id", "id", "From Medusa"),
@@ -150,7 +156,9 @@ def _free_title(wanted: str, uid: str) -> str:
 	taken has to take another. Renaming the squatter would be worse: it is
 	somebody's work, and a reset that renames it is a reset that lost it.
 	"""
-	existing = frappe.db.get_value(config.MAPPING_DOCTYPE, wanted, ["name", "mapping_uid"], as_dict=True)
+	existing = frappe.db.get_value(
+		config.MAPPING_DOCTYPE, wanted, ["name", "mapping_uid"], as_dict=True
+	)
 	if not existing or existing.mapping_uid == uid:
 		return wanted
 	suffix = uid.replace(UID_PREFIX, "").replace("_", " ")
@@ -160,6 +168,70 @@ def _free_title(wanted: str, uid: str) -> str:
 		candidate = f"{wanted} ({suffix} {index})"
 		index += 1
 	return candidate
+
+
+def _write_spec(doc, spec: dict) -> None:
+	"""Put the shipped shape onto a document, in memory."""
+	doc.update(
+		{
+			"enabled": 0,
+			"document_type": spec["document_type"],
+			"medusa_entity": spec["medusa_entity"],
+			"direction": spec["direction"],
+			"key_field": spec["key_field"],
+			"docevents": "\n".join(spec["docevents"]),
+			"condition": None,
+			"include_all_fields": 0,
+			"allow_insert": spec.get("allow_insert", 0),
+			"allow_update": spec.get("allow_update", 0),
+			"allow_delete": spec.get("allow_delete", 0),
+		}
+	)
+	doc.set("field_map", [])
+	for erpnext_field, medusa_path, direction in spec["fields"]:
+		doc.append(
+			"field_map",
+			{"frappe_field": erpnext_field, "medusa_path": medusa_path, "direction": direction},
+		)
+	# A default that has just been written has not been rehearsed as it now
+	# stands, and the enable gate reads the signature rather than the flag,
+	# so clearing it is what makes the gate tell the truth afterwards.
+	doc.tested_signature = None
+	doc.last_test_status = "Untested"
+	doc.last_test_report = None
+
+
+def spec_signature(spec: dict) -> str:
+	"""What a mapping written from this spec would fingerprint as."""
+	probe = frappe.new_doc(config.MAPPING_DOCTYPE)
+	probe.title = "medusync-defaults-probe"
+	_write_spec(probe, spec)
+	return probe.test_signature()
+
+
+def _stamp(doc) -> None:
+	"""Record what we shipped, so a later upgrade can tell whether anybody
+	has touched it since. Written straight to the column: it describes the
+	document rather than changing it, and a save would bump the version."""
+	frappe.db.set_value(
+		config.MAPPING_DOCTYPE,
+		doc.name,
+		"shipped_signature",
+		doc.test_signature(),
+		update_modified=False,
+	)
+
+
+def _create(spec: dict):
+	doc = frappe.new_doc(config.MAPPING_DOCTYPE)
+	doc.title = _free_title(spec["title"], spec["uid"])
+	doc.mapping_uid = spec["uid"]
+	_write_spec(doc, spec)
+	doc.flags.ignore_permissions = True
+	doc.insert(ignore_permissions=True)
+	_stamp(doc)
+	clear(doc.name)
+	return doc
 
 
 def restore_defaults(reason: str = "restore") -> dict:
@@ -178,54 +250,104 @@ def restore_defaults(reason: str = "restore") -> dict:
 			continue
 
 		name = frappe.db.get_value(config.MAPPING_DOCTYPE, {"mapping_uid": spec["uid"]}, "name")
-		doc = (
-			frappe.get_doc(config.MAPPING_DOCTYPE, name)
-			if name
-			else frappe.new_doc(config.MAPPING_DOCTYPE)
-		)
 		if not name:
-			doc.title = _free_title(spec["title"], spec["uid"])
-			doc.mapping_uid = spec["uid"]
-
-		doc.update(
-			{
-				"enabled": 0,
-				"document_type": spec["document_type"],
-				"medusa_entity": spec["medusa_entity"],
-				"direction": spec["direction"],
-				"key_field": spec["key_field"],
-				"docevents": "\n".join(spec["docevents"]),
-				"condition": None,
-				"include_all_fields": 0,
-				"allow_insert": spec.get("allow_insert", 0),
-				"allow_update": spec.get("allow_update", 0),
-				"allow_delete": spec.get("allow_delete", 0),
-			}
-		)
-		doc.set("field_map", [])
-		for erpnext_field, medusa_path, direction in spec["fields"]:
-			doc.append(
-				"field_map",
-				{"frappe_field": erpnext_field, "medusa_path": medusa_path, "direction": direction},
-			)
-
-		# A restored default has not been rehearsed as it now stands, and
-		# the enable gate reads the signature rather than the flag, so
-		# clearing it is what makes the gate tell the truth afterwards.
-		doc.tested_signature = None
-		doc.last_test_status = "Untested"
-		doc.last_test_report = None
-
-		doc.flags.ignore_permissions = True
-		if name:
-			doc.save(ignore_permissions=True)
+			doc = _create(spec)
 		else:
-			doc.insert(ignore_permissions=True)
+			doc = frappe.get_doc(config.MAPPING_DOCTYPE, name)
+			_write_spec(doc, spec)
+			doc.flags.ignore_permissions = True
+			doc.save(ignore_permissions=True)
+			_stamp(doc)
+			clear(doc.name)
 		restored.append({"uid": spec["uid"], "name": doc.name})
 
 	frappe.db.set_single_value("Medusync Settings", "defaults_version", DEFAULTS_VERSION)
 	frappe.clear_cache(doctype="Medusync Settings")
 	return {"version": DEFAULTS_VERSION, "reason": reason, "mappings": restored, "skipped": skipped}
+
+
+def apply_defaults(force: bool = False, reason: str = "upgrade") -> dict:
+	"""Bring a running site up to the current default set.
+
+	Never overwrites a default somebody has edited. `force` is the "Apply
+	new defaults anyway" button: the operator has read the notification
+	and decided.
+	"""
+	result = {
+		"version": DEFAULTS_VERSION,
+		"reason": reason,
+		"created": [],
+		"applied": [],
+		"unchanged": [],
+		"flagged": [],
+		"skipped": [],
+	}
+
+	for spec in default_mappings():
+		if not _applicable(spec):
+			result["skipped"].append(
+				{"uid": spec["uid"], "reason": f"no DocType {spec['document_type']}"}
+			)
+			continue
+
+		name = frappe.db.get_value(config.MAPPING_DOCTYPE, {"mapping_uid": spec["uid"]}, "name")
+		if not name:
+			doc = _create(spec)
+			result["created"].append({"uid": spec["uid"], "name": doc.name})
+			continue
+
+		doc = frappe.get_doc(config.MAPPING_DOCTYPE, name)
+		current = doc.test_signature()
+		shipped = doc.get("shipped_signature")
+		if shipped:
+			untouched = shipped == current
+		else:
+			# Installed by a version that did not record the fingerprint.
+			# If it still matches what this set would produce then nobody
+			# has touched it and we can adopt it. Otherwise we genuinely
+			# cannot tell, and not overwriting is the safe answer.
+			untouched = current == spec_signature(spec)
+
+		if not (force or untouched):
+			detail = frappe._(
+				"This mapping was edited since it was installed, so the new default set has not "
+				"been applied to it. Review the differences and either keep yours or use Apply "
+				"New Defaults to take the shipped one."
+			)
+			if flag(doc.name, MAPPING_REQUIRED, detail):
+				notify_attention(doc.name, MAPPING_REQUIRED, detail)
+			result["flagged"].append({"uid": spec["uid"], "name": doc.name})
+			continue
+
+		_write_spec(doc, spec)
+		if doc.test_signature() == current and not force:
+			# Already exactly what we would have written. Stamp it so a
+			# later upgrade knows, and say nothing.
+			_stamp(doc)
+			clear(doc.name)
+			result["unchanged"].append({"uid": spec["uid"], "name": doc.name})
+			continue
+
+		doc.flags.ignore_permissions = True
+		doc.save(ignore_permissions=True)
+		_stamp(doc)
+		clear(doc.name)
+		result["applied"].append({"uid": spec["uid"], "name": doc.name})
+
+	# The version is the site's claim to have the current set. It only
+	# moves when nothing is outstanding, so a site with an edited default
+	# keeps being asked rather than quietly counting as up to date.
+	if not result["flagged"]:
+		frappe.db.set_single_value("Medusync Settings", "defaults_version", DEFAULTS_VERSION)
+		frappe.clear_cache(doctype="Medusync Settings")
+	return result
+
+
+@frappe.whitelist()
+def apply_now(force: int | bool = False) -> dict:
+	"""The "Apply New Defaults" button."""
+	frappe.only_for("System Manager")
+	return apply_defaults(force=bool(int(force or 0)), reason="operator")
 
 
 def installed_version() -> int:
@@ -236,5 +358,5 @@ def installed_version() -> int:
 
 
 def owns(uid: str | None) -> bool:
-	"""Is this one of ours? The question a restore and a reset both ask."""
+	"""Is this one of ours? The question a restore and an upgrade both ask."""
 	return bool(uid) and str(uid).startswith(UID_PREFIX)

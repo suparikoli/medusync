@@ -6,7 +6,7 @@ import json
 import frappe
 from frappe.utils import add_days, now_datetime
 
-from medusync import config, envelope, outbound
+from medusync import breaker, config, envelope, outbound
 
 
 #: Rehearsals are kept just long enough to read the result. Nobody
@@ -74,7 +74,15 @@ def retry_due(limit: int = 200):
 		order_by="next_attempt_at asc",
 		limit=limit,
 	)
+	# A store the breaker has given up on gets exactly one delivery per
+	# sweep — somebody has to knock, or it never learns the store came
+	# back — and the rest of its queue waits.
+	probed: set = set()
 	for row in rows:
+		if row.site and breaker.is_tripped(row.site):
+			if row.site in probed:
+				continue
+			probed.add(row.site)
 		frappe.db.set_value("Medusync Log", row.name, {"next_attempt_at": None}, update_modified=False)
 		try:
 			payload = json.loads(row.request_body or "{}")

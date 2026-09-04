@@ -28,7 +28,10 @@
   "health_section",
   "last_seen_at",
   "column_break_health",
-  "last_error"
+  "last_error",
+  "consecutive_failures",
+  "tripped_at",
+  "trip_after"
  ],
  "fields": [
   {
@@ -179,6 +182,29 @@
    "label": "Price Lists",
    "options": "Medusync Price List Map",
    "description": "Price lists this store sees, which way each one travels, and whether it is a base price or a customer tier."
+  },
+  {
+   "default": "0",
+   "fieldname": "consecutive_failures",
+   "fieldtype": "Int",
+   "label": "Consecutive Failures",
+   "read_only": 1,
+   "description": "Reset to zero the moment this store answers."
+  },
+  {
+   "fieldname": "tripped_at",
+   "fieldtype": "Datetime",
+   "label": "Stopped Trying At",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Set when the failures above reached the threshold. While this is set, deliveries to this store are skipped rather than attempted, and one is let through per minute to find out whether it has come back. One success clears it. Other stores are unaffected."
+  },
+  {
+   "default": "10",
+   "fieldname": "trip_after",
+   "fieldtype": "Int",
+   "label": "Stop Trying After",
+   "description": "Consecutive failures before this store is left alone. Ten is about a deploy's worth of downtime at the retry backoff, so a rolling restart does not trip it and a real outage does."
   }
  ],
  "links": [],

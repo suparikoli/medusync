@@ -42,7 +42,7 @@ import json
 import frappe
 from frappe.utils import add_to_date, now_datetime
 
-from medusync import config, echo, envelope, selection, sites
+from medusync import breaker, config, echo, envelope, selection, sites
 from medusync.signing import EVENT_ID_HEADER, SIGNATURE_HEADER, sign
 
 QUEUE = "short"
@@ -401,6 +401,20 @@ def deliver(
 		)
 		return
 
+	# A store that has failed ten times running will fail the eleventh,
+	# and every attempt holds a worker for the length of the timeout. With
+	# several stores connected, one that is down would starve the queue
+	# for the ones that are up.
+	if not breaker.allows(site["site_id"], is_test=is_test):
+		_finish_log(
+			log_name,
+			status="Skipped",
+			error="this store is not answering, so deliveries to it are paused (see Stopped Trying At on the store)",
+			attempt=attempt,
+			next_attempt_at=None,
+		)
+		return
+
 	endpoint = sites.endpoint(site)
 	secret = sites.secret(site, "outbound_secret")
 	if not endpoint or not secret:
@@ -520,6 +534,7 @@ def _retry_or_fail(
 			fields["request_body"] = None
 		_finish_log(log_name, **fields)
 		_mark_site_error(site_id, error)
+		breaker.record_failure(site_id)
 		return
 
 	# Park the row; `medusync.tasks.retry_due` re-enqueues it once
@@ -561,6 +576,8 @@ def _mark_site_seen(site_id, is_test: bool = False):
 		)
 	except Exception:
 		pass
+	# It answered, so start counting again from nothing.
+	breaker.record_success(site_id)
 
 
 def _mark_site_error(site_id, error):
