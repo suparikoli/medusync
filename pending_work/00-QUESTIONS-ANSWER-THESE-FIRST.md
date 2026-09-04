@@ -47,14 +47,14 @@ far easier to sync than a balance plus a ledger.
 (b) A balance DocType and a transaction DocType
 (c) ★ Tell me when it exists and I will read it rather than guess now
 
-> **Answer:**
+> **Answer:** We will create a new application on both Frappe and Medusa which will deal with wallet and line of credit. I'll give you access to those later once it's done
 
 **Q2. Which side owns the balance once both exist?**
 (a) ERPNext computes it, Medusa caches a read-only copy
 (b) ★ ERPNext computes it and Medusa never stores one, only transactions
 (c) Both, reconciled — this needs a tie-break rule and it has to be yours
 
-> **Answer:**
+> **Answer:** Both with time stamp and if that doesn't resolve the conflict ERPNext's data takes precidence
 
 **Q3. `Customer.wallet_balance_paise` still exists on the ERPNext side with
 nothing writing to it, left over from the custom app that was uninstalled.
@@ -63,7 +63,7 @@ app?**
 (a) Keep
 (b) ★ Drop it — a field the new app does not own is a trap
 
-> **Answer:**
+> **Answer:** If anything exists, it will be related to the old work remove it from both medusa and ERPNext
 
 **Q3b. Should the connector treat wallet and credit line as one entity or
 two?**
@@ -73,7 +73,7 @@ tables alongside `wallet`, which suggests two.
 reconcile differently
 (b) One ledger with a sign
 
-> **Answer:**
+> **Answer:** 2 in both the Cases. In ERPNext let's have a setting called Wallet-LOC-balancer. Remember this for now. I'll just need feature list for both Frappe and medusa applications for Wallet-LOC. Later
 
 ### Percentage Pricing Rules and MRP — `2026-09-04-pricing-rules-and-mrp.md`
 
@@ -86,7 +86,7 @@ Flat-rate tier prices already sync. Percentages have no direct counterpart.
 wrong until somebody needs it enforced at checkout
 (d) Not at all
 
-> **Answer:**
+> **Answer:** Let's use ERPNext default price list. Also, when we modify the product doctype in erpenext. Let's put all the custom fields related to Medusync in a separate tab where we'll have everything. We'll dive deeper into this later
 
 **Q5. Where should MRP land?**
 (a) Variant metadata, for display only
@@ -94,7 +94,7 @@ wrong until somebody needs it enforced at checkout
 it through with real price machinery
 (c) Not at all
 
-> **Answer:**
+> **Answer:** I don't want to use MRP I want to use 
 
 **Q6. There is no ERPNext field for MRP on the demo site and no Pricing
 Rules seeded. Will you seed a site, or should I add an `Item.mrp` custom
