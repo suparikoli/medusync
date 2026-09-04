@@ -2,7 +2,7 @@
 
 **Requirement.** Price lists sync bidirectionally with per-list direction.
 Rate-based tier prices and quantity ladders already sync from
-`handlers/risitex/pricing.py` (`variant.price.set`, `variant.tier_price.set`
+`handlers/commerce/pricing.py` (`variant.price.set`, `variant.tier_price.set`
 with `Item Price.packing_unit` → `min_quantity`). Still open:
 - ERPNext **Pricing Rules** expressed as percentages or discounts are not
   pushed at all.

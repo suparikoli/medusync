@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - older frappe
 
 from medusync import handlers
 from medusync.handlers import outbound_guard
+from medusync.tests import probe_pack
 
 CONF_KEY = handlers.CONF_KEY
 
@@ -49,10 +50,10 @@ class TestPackOutboundHooks(IntegrationTestCase):
 		self.assertEqual(configured, set(), f"hooks.py still hardcodes: {sorted(configured)}")
 
 	def test_a_configured_pack_supplies_its_outbound_hooks(self):
-		self._set(["risitex"])
+		self._set(["commerce"])
 		fns = handlers.outbound_hooks_for("Item Price", "on_update")
 		self.assertEqual(len(fns), 1)
-		self.assertEqual(fns[0].__module__, "medusync.handlers.risitex.pricing")
+		self.assertEqual(fns[0].__module__, "medusync.handlers.commerce.pricing")
 
 	def test_no_pack_means_no_outbound_domain_code(self):
 		self._set([])
@@ -61,16 +62,21 @@ class TestPackOutboundHooks(IntegrationTestCase):
 		self.assertEqual(handlers.outbound_hooks_for("Delivery Note", "on_submit"), [])
 
 	def test_a_pack_that_declares_none_contributes_none(self):
-		self._set(["polemarch"])
-		self.assertEqual(handlers.outbound_hooks_for("Item Price", "on_update"), [])
+		"""A pack may only listen. It must not be made to contribute a
+		hook, and its silence must not disturb what other packs said."""
+		with probe_pack.installed():
+			self._set(["probe"])
+			self.assertEqual(handlers.outbound_hooks_for("Item Price", "on_update"), [])
+			self._set(["probe", "commerce"])
+			self.assertEqual(len(handlers.outbound_hooks_for("Item Price", "on_update")), 1)
 
 	def test_unrelated_doctypes_and_events_match_nothing(self):
-		self._set(["risitex"])
+		self._set(["commerce"])
 		self.assertEqual(handlers.outbound_hooks_for("User", "on_update"), [])
 		self.assertEqual(handlers.outbound_hooks_for("Item Price", "on_submit"), [])
 
 	def test_every_declared_hook_resolves_to_a_real_function(self):
-		self._set(["risitex"])
+		self._set(["commerce"])
 		seen = 0
 		for doctype, events in handlers.outbound_hook_map().items():
 			for event, fns in events.items():
@@ -80,7 +86,7 @@ class TestPackOutboundHooks(IntegrationTestCase):
 		self.assertGreater(seen, 0)
 
 	def test_the_dispatcher_runs_the_configured_hooks_only(self):
-		self._set(["risitex"])
+		self._set(["commerce"])
 		calls = []
 
 		def spy(doc, method=None):

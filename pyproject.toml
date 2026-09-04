@@ -1,6 +1,6 @@
 [project]
 name = "medusync"
-authors = [{ name = "Mithtech Innovative Solutions PVT LTD", email = "manoj@polemarch.in" }]
+authors = [{ name = "Mithtech Innovative Solutions PVT LTD", email = "mithtech.is@gmail.com" }]
 description = "Two-way sync between a Frappe/ERPNext site and a Medusa v2 backend."
 requires-python = ">=3.10"
 readme = "README.md"

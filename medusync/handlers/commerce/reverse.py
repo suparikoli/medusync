@@ -187,7 +187,7 @@ def create_pending_return(medusa_order_id, items):
 
 
 # ── Inbound: Medusa customer return REQUEST -> DRAFT return DN ──────────
-# Registered into the handler registry (see handlers/risitex/__init__.py)
+# Registered into the handler registry (see handlers/commerce/__init__.py)
 # so it arrives through medusync.api.receive with the full transport
 # hardening (HMAC + replay window + idempotency + Medusync Log row).
 # This is the last-mile trigger: the Medusa admin "request return" route

@@ -125,22 +125,29 @@ Drop `dry_run` once the counts look right.
 
 ## Handler packs
 
-medusync's core is domain-neutral. Site-specific behaviour ships as
-*handler packs* under `medusync/handlers/<pack>/` (today: `polemarch`,
-`risitex`). A site chooses which packs load in its `site_config.json`:
+medusync's core is domain-neutral. Domain behaviour ships as *handler
+packs* under `medusync/handlers/<pack>/`. One is shipped: `commerce` —
+stock levels, prices, delivery notes, invoices and order metadata, which
+is what every store has. A site chooses its packs in `site_config.json`:
 
 ```json
-"medusync_handler_packs": ["risitex"]
+"medusync_handler_packs": ["commerce"]
 ```
 
-When the key is absent the `polemarch` pack loads, which is what existing
-installations expect. An empty list loads nothing: inbound events then go
-through Medusync Mapping rows only, and `receive_mapped` answers 500 until
-a pack that provides a mapped upsert is configured.
+When the key is absent, `commerce` loads, which is what a site without an
+opinion wants. An empty list loads nothing: inbound events then go through
+Medusync Mapping rows only, and a mapped push is skipped until a pack that
+provides an upsert is configured.
 
-Today the switch gates inbound dispatch and the mapped upsert; the RISITEX
-pack's *outbound* doc-event hooks in `hooks.py` still run on every site
-(see `pending_work/2026-09-04-outbound-hooks-behind-packs.md`).
+The switch works in **both** directions. `hooks.py` names no business
+doctype at all — it binds one wildcard handler for the six document
+events, and that handler asks the configured packs which of their outbound
+hooks apply. A site running no pack runs no domain code either way.
+
+A deployment with behaviour of its own adds a pack rather than editing
+this one: a module under `medusync/handlers/<name>/` exposing `register()`,
+`MAPPED_UPSERT` and `OUTBOUND_HOOKS`, named in that site's config. Nothing
+client-specific is shipped here.
 
 ## Retries
 

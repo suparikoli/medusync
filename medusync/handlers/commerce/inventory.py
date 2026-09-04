@@ -30,7 +30,7 @@ def on_sle(doc, method=None):
         if not warehouses.is_watched(doc.warehouse):
             return
         frappe.enqueue(
-            "medusync.handlers.risitex.inventory.push_level",
+            "medusync.handlers.commerce.inventory.push_level",
             queue="short",
             item_code=doc.item_code,
             warehouse=doc.warehouse,
@@ -64,7 +64,7 @@ def on_sales_order(doc, method=None):
                 continue
             seen.add(key)
             frappe.enqueue(
-                "medusync.handlers.risitex.inventory.push_level",
+                "medusync.handlers.commerce.inventory.push_level",
                 queue="short",
                 item_code=line.item_code,
                 warehouse=warehouse,

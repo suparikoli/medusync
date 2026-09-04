@@ -264,7 +264,7 @@ class TestThePush(PriceListCase):
 	def test_a_base_list_sends_the_variant_price(self):
 		self._site("pl-push", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}])
 		self._disable_others()
-		from medusync.handlers.risitex import pricing
+		from medusync.handlers.commerce import pricing
 
 		with self._capture() as sent:
 			pricing.on_item_price(self._item_price(self.pl_a, rate=799), method="on_update")
@@ -284,7 +284,7 @@ class TestThePush(PriceListCase):
 			],
 		)
 		self._disable_others()
-		from medusync.handlers.risitex import pricing
+		from medusync.handlers.commerce import pricing
 
 		with self._capture() as sent:
 			pricing.on_item_price(
@@ -300,7 +300,7 @@ class TestThePush(PriceListCase):
 			"pl-push3", [{"price_list": self.pl_a, "direction": "Don't Sync", "role": "Base Price"}]
 		)
 		self._disable_others()
-		from medusync.handlers.risitex import pricing
+		from medusync.handlers.commerce import pricing
 
 		with self._capture() as sent:
 			pricing.on_item_price(self._item_price(self.pl_a), method="on_update")
@@ -313,7 +313,7 @@ class TestThePush(PriceListCase):
 			[{"price_list": self.pl_a, "direction": "To Medusa", "role": "Tier Price", "tier_code": "t2"}],
 		)
 		self._disable_others()
-		from medusync.handlers.risitex import pricing
+		from medusync.handlers.commerce import pricing
 
 		with self._capture() as sent:
 			pricing.on_item_price(self._item_price(self.pl_a), method="on_update")

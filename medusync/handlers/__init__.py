@@ -15,7 +15,7 @@ packs* (`medusync.handlers.<pack>`), each exposing any of:
 
 Which packs a site loads is that site's decision, in `site_config.json`:
 
-    "medusync_handler_packs": ["risitex"]
+    "medusync_handler_packs": ["commerce"]
 
 Packs are opt-in in BOTH directions. `hooks.py` names no business doctype
 at all: it binds one wildcard handler for the six document events, and
@@ -24,8 +24,8 @@ site running no pack runs no domain code either way.
 
 Nothing is registered at import time — a bench CLI process has no site
 context yet — so the registry is (re)built lazily on first use, per site.
-When the key is absent the Polemarch pack loads, which keeps installations
-that predate this setting behaving exactly as before.
+When the key is absent the commerce pack loads, which is what a site
+without an opinion wants: stock, prices and the post-order path.
 """
 
 import importlib
@@ -39,7 +39,7 @@ from medusync.handlers import outbound_guard
 HANDLERS: dict[str, Callable] = {}
 
 CONF_KEY = "medusync_handler_packs"
-DEFAULT_PACKS = ("polemarch",)
+DEFAULT_PACKS = ("commerce",)
 
 # site -> the packs tuple the registry currently reflects. One process may
 # serve several sites; a different pack list rebuilds the registry rather
@@ -61,9 +61,6 @@ def configured_packs() -> list[str]:
 		packs = [p.strip() for p in raw.split(",") if p.strip()]
 	else:
 		packs = [str(p).strip() for p in raw if str(p).strip()]
-	# Operator/test escape hatch that predates the site_config key.
-	if os.environ.get("MEDUSYNC_SKIP_POLEMARCH"):
-		packs = [p for p in packs if p != "polemarch"]
 	return packs
 
 

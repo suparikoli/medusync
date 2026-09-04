@@ -7,16 +7,17 @@ different computer, having forgotten which half lives where.
 
 | | Where | In git |
 |---|---|---|
-| This plugin | `medusa-plugin-erpnext-generic` | ✅ `mithtech-is/medusa-erpnextsync` |
-| The Frappe app | WSL `frappe-bench/apps/medusync` | ✅ `suparikoli/medusync` |
-| The Medusa sandbox `risitex-mainb2b` | Windows | ❌ deliberately detached, local only |
-| The Frappe bench and its site | WSL | ❌ never was |
+| This plugin | a Medusa 2.19 project's plugin folder | ✅ `mithtech-is/medusa-erpnextsync` |
+| The Frappe app | `frappe-bench/apps/medusync` | ✅ `suparikoli/medusync` |
+| The Medusa project you test against | wherever you put it | ❌ yours, local only |
+| The Frappe bench and its site | wherever you put it | ❌ never was |
 
 Both applications are entirely in git. **Neither stack is.** That is the
 important sentence: a new machine has the code and none of the environment,
 and rebuilding the environment is most of the work.
 
-Everything is on the branch `feat/phase0-1-foundation` in both repos.
+Both repos carry everything on their default branch — `master` for the
+Frappe app, `main` for the plugin.
 
 ## What you can do with only the repos
 
@@ -26,7 +27,7 @@ More than you would expect, and this is the cheapest way back in:
 git clone https://github.com/mithtech-is/medusa-erpnextsync.git
 cd medusa-erpnextsync && npm install
 npm run typecheck     # tsc, app and specs
-npm test              # vitest — 117 specs, no database, no Medusa
+npm test              # vitest — no database, no Medusa
 ```
 
 The pure modules carry the rules worth being sure about — the envelope, the
@@ -45,13 +46,14 @@ a bench with a site.
 ```bash
 bench get-app https://github.com/suparikoli/medusync.git
 bench --site <site> install-app medusync
-bench --site <site> set-config medusync_handler_packs '["risitex"]'
 bench --site <site> migrate
 bench --site <site> run-tests --app medusync    # ~300 tests
 ```
 
-`after_migrate` installs the three shipped mappings, switched off, and runs
-the drift check. Both report rather than fail.
+No `set-config` step: a fresh site gets the `commerce` handler pack, which
+is what a site without an opinion wants. `after_migrate` installs the three
+shipped mappings, switched off, and runs the drift check. Both report rather
+than fail.
 
 **Medusa side.** Any Medusa 2.19 project. The plugin is consumed through
 Medusa's yalc flow, not npm:
@@ -84,9 +86,9 @@ previous build so a newly imported module is simply missing at boot.
 
 An inbound request is attributed to a store **by its signature**, not by any
 header, so a store cannot claim to be another. The one exception is the
-legacy Single secret — see `medusync/pending_work/` and question Q19.
+legacy Single secret — see `pending_work/` and question Q19.
 
-## If both machines are on the same network
+## If the two halves are on different machines or in a VM
 
 The addresses are the fiddly part and are machine-specific. `docs/LOCAL_DEV.md`
 covers the WSL⇄Windows case in detail, including why the WSL IP changes on
@@ -99,21 +101,21 @@ macOS machine none of that applies and `localhost` works.
 - This file is kept identical in both; it describes the pair, not one side.
 - `pending_work/00-QUESTIONS-ANSWER-THESE-FIRST.md` — every open decision.
 - `README.md` — the wire contract, the studio, the reset, the defaults.
-- The plan file this was built from lives outside both repos, in
-  `~/.claude/plans/`, and has a per-phase record of what was delivered and
-  what was deliberately left.
 
-## The state this machine was left in
+## What a fresh install looks like
 
-So the difference is not mistaken for a bug:
+So that a difference from this is recognised as a difference, not assumed
+to be a bug:
 
-- The three shipped default mappings are installed and **switched off**;
-  two hand-written ones (`Customer to Medusa`, `Item to Medusa`) are on.
-- Both sync logs were emptied by a live hard-reset test and hold only what
-  has happened since.
-- Site `default` has two warehouse rows, so `Stores - R` syncs and the two
-  group warehouses do not. A Medusa stock location named "Phase 3 second
-  location" exists for the same test.
-- Medusa order #1 carries `erp_order` and `erp_payments` metadata from a
-  live Phase 3 check.
-- The legacy Single secret is **on**, which is the shipped default.
+- Three shipped default mappings — customer, catalogue, orders — installed
+  and **switched off**. They stay off until a mapping is rehearsed in the
+  studio; that gate is deliberate and is the whole point of Phase 4.
+- The `commerce` handler pack loaded, because the site config says nothing.
+  It is stock levels, prices, delivery notes, invoices and order metadata.
+- No Medusync Site, so nothing is delivered anywhere. Create one, pair it,
+  then map its warehouses and price lists — neither has a default, because
+  neither can be guessed.
+- Empty `Medusync Log` and `erpnext_sync_event`. Both fill from first use
+  and are pruned on the retention in the settings.
+- The legacy Single secret **on**, which is the shipped default and matters
+  only to a site upgrading from before there were Sites.

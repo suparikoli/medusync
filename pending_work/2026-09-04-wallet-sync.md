@@ -17,15 +17,15 @@ the earlier attempt at one is exactly why the demo module was removed.
 
 ## Where things stand today
 
-**ERPNext.** No wallet DocType at all. `RISITEX Wallet Settlement` went
-with the `risitex_erp` uninstall on 2026-09-04. `Customer.wallet_balance_paise`
-survives with nothing writing to it — see Q3.
+**ERPNext.** No wallet DocType at all. The one the first deployment had
+went with its custom app when that was uninstalled on 2026-09-04.
+`Customer.wallet_balance_paise` survives with nothing writing to it — see Q3.
 
 **Medusa.** A real `cashfree_wallet` module is installed on the sandbox and
-holds data: 22 wallets, 11 transactions, 4 settlements. It belongs to the
-Polemarch securities domain rather than to generic commerce, so it is a
-reasonable thing to test transport against and the wrong thing to model a
-contract on.
+holds data: 22 wallets, 11 transactions, 4 settlements. It was written for
+one deployment's securities domain rather than for generic commerce, so it
+is a reasonable thing to test transport against and the wrong thing to
+model a contract on.
 
 **The connector.** Cleaned of the debris on 2026-09-05: the registry no
 longer offers a `wallet_settlement` entity, the dead mapping is switched

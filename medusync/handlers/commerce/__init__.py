@@ -3,8 +3,7 @@
 
 """Commerce handler pack for the Medusa wire.
 
-Where the Polemarch pack maps Medusa products to `Security` (by ISIN)
-and orders to `Security Sale`, this one is ordinary commerce:
+Ordinary commerce, and the pack a site gets by default:
 
   Product  -> Item             (with the mandatory item_group / stock_uom)
   Order    -> Sales Order      (customer link + child line items)
@@ -13,7 +12,7 @@ and orders to `Security Sale`, this one is ordinary commerce:
 
 Everything here is opt-in per site through `site_config.json`:
 
-    "medusync_handler_packs": ["risitex"]
+    "medusync_handler_packs": ["commerce"]
 
 `hooks.py` names none of these doctypes; it binds one wildcard handler
 which asks the registry for the hooks the configured packs declare below.
@@ -23,7 +22,7 @@ from medusync.handlers import register_handler
 
 # Doctype-aware upsert used by the mapped push path
 # (see medusync.handlers.get_mapped_upsert).
-MAPPED_UPSERT = "medusync.handlers.risitex.mapped.upsert_via_mapping"
+MAPPED_UPSERT = "medusync.handlers.commerce.mapped.upsert_via_mapping"
 
 # Document events this pack acts on. The core binds nothing for these
 # doctypes; a site without this pack runs none of it.
@@ -34,22 +33,22 @@ MAPPED_UPSERT = "medusync.handlers.risitex.mapped.upsert_via_mapping"
 #   Item Price / Item / Customer      -> price, MOQ and customer group
 OUTBOUND_HOOKS = {
 	"Stock Ledger Entry": {
-		"after_insert": "medusync.handlers.risitex.inventory.on_sle",
+		"after_insert": "medusync.handlers.commerce.inventory.on_sle",
 	},
 	# Two callables, both wanted: one re-pushes the stock the order
 	# reserves, the other reports where the order came from and what has
 	# been paid. A single dotted path here would silently drop one.
 	"Sales Order": {
 		"on_submit": [
-			"medusync.handlers.risitex.inventory.on_sales_order",
+			"medusync.handlers.commerce.inventory.on_sales_order",
 			"medusync.order_meta.on_sales_order",
 		],
 		"on_cancel": [
-			"medusync.handlers.risitex.inventory.on_sales_order",
+			"medusync.handlers.commerce.inventory.on_sales_order",
 			"medusync.order_meta.on_sales_order",
 		],
 		"on_update_after_submit": [
-			"medusync.handlers.risitex.inventory.on_sales_order",
+			"medusync.handlers.commerce.inventory.on_sales_order",
 			"medusync.order_meta.on_sales_order",
 		],
 	},
@@ -60,29 +59,29 @@ OUTBOUND_HOOKS = {
 		"on_cancel": "medusync.order_meta.on_payment_entry",
 	},
 	"Delivery Note": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_delivery_note",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_delivery_note",
+		"on_submit": "medusync.handlers.commerce.reverse.on_delivery_note",
+		"on_cancel": "medusync.handlers.commerce.reverse.on_delivery_note",
 	},
 	"Shipment": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_shipment",
-		"on_update_after_submit": "medusync.handlers.risitex.reverse.on_shipment",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_shipment",
+		"on_submit": "medusync.handlers.commerce.reverse.on_shipment",
+		"on_update_after_submit": "medusync.handlers.commerce.reverse.on_shipment",
+		"on_cancel": "medusync.handlers.commerce.reverse.on_shipment",
 	},
 	"Sales Invoice": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_sales_invoice",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_sales_invoice",
+		"on_submit": "medusync.handlers.commerce.reverse.on_sales_invoice",
+		"on_cancel": "medusync.handlers.commerce.reverse.on_sales_invoice",
 	},
 	"Item Price": {
-		"after_insert": "medusync.handlers.risitex.pricing.on_item_price",
-		"on_update": "medusync.handlers.risitex.pricing.on_item_price",
-		"on_trash": "medusync.handlers.risitex.pricing.on_item_price",
+		"after_insert": "medusync.handlers.commerce.pricing.on_item_price",
+		"on_update": "medusync.handlers.commerce.pricing.on_item_price",
+		"on_trash": "medusync.handlers.commerce.pricing.on_item_price",
 	},
 	"Item": {
-		"on_update": "medusync.handlers.risitex.pricing.on_item",
+		"on_update": "medusync.handlers.commerce.pricing.on_item",
 	},
 	"Customer": {
-		"after_insert": "medusync.handlers.risitex.pricing.on_customer_group_link",
-		"on_update": "medusync.handlers.risitex.pricing.on_customer_group_link",
+		"after_insert": "medusync.handlers.commerce.pricing.on_customer_group_link",
+		"on_update": "medusync.handlers.commerce.pricing.on_customer_group_link",
 	},
 }
 
@@ -96,6 +95,6 @@ def register() -> None:
 	method call needs a handler here, because there is no doctype to
 	upsert — it calls create_pending_return instead.
 	"""
-	from medusync.handlers.risitex.reverse import handle_return_requested
+	from medusync.handlers.commerce.reverse import handle_return_requested
 
 	register_handler("order.return_requested", handle_return_requested)

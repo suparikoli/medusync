@@ -1,33 +1,22 @@
 # Copyright (c) 2026, Mithtech Innovative Solutions PVT LTD and contributors
 # For license information, please see license.txt
 
-"""RISITEX canonical-mapping upsert for `medusync.api.receive_mapped`.
+"""Canonical-mapping upsert for `medusync.api.receive_mapped`.
 
-Drop-in replacement for `medusync.handlers.polemarch.order.upsert_via_mapping`
-with RISITEX (textile commerce) semantics instead of Polemarch's
-securities model. Ported from the verified `risitex_erp` medusa_webhook
-handler:
+Ordinary commerce semantics: a Medusa product becomes an Item, an order
+becomes a Sales Order with its line items, an invoice becomes a Sales
+Invoice, a customer becomes a Customer.
 
-  - Item        : create/update with the mandatory item_group / stock_uom
-                  defaults; dedupe by item_code.
-  - Sales Order : resolve the Customer (by medusa_customer_id, then
-                  contact_email), build the child `items` table from the
-                  `medusa_items[]` the Medusa plugin sends, set company +
-                  delivery_date, and let Frappe compute totals.
-  - Sales Invoice: same customer + line-item build.
-  - Customer    : upsert with a customer_name fallback; None-guarded.
-  - everything else: generic scalar upsert.
-
-Loop prevention: sets both `frappe.flags.medusync_inbound` (medusync's
-own outbound guard) and `frappe.flags.in_medusa_sync` (the legacy
-risitex_erp outbound guard) so neither app echoes this write back to
-Medusa while both are installed on the same site.
+Writes go through the doctype layer rather than `db_set`, so ERPNext's own
+validation runs and the connector never has to reimplement it. Everything
+here runs under `frappe.flags.medusync_inbound`, so the save this makes is
+recognised as an inbound write and is not echoed back to the store.
 """
 
 import frappe
-from medusync.handlers.risitex.sales_financials import apply_financials
-from medusync.handlers.risitex.address_sync import sync_customer_addresses
-from medusync.handlers.risitex.contact_sync import sync_customer_contact
+from medusync.handlers.commerce.sales_financials import apply_financials
+from medusync.handlers.commerce.address_sync import sync_customer_addresses
+from medusync.handlers.commerce.contact_sync import sync_customer_contact
 
 _INSERT_DEFAULTS = {
 	"Item": {"item_group": "Products", "stock_uom": "Nos", "is_stock_item": 1},

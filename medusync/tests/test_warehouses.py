@@ -209,7 +209,7 @@ class TestThePush(WarehouseCase):
 		self._site("wh-p1", [(self.wh_a, "sloc_one")])
 		self._site("wh-p2", [(self.wh_a, "sloc_two")])
 		self._disable_others()
-		from medusync.handlers.risitex import inventory
+		from medusync.handlers.commerce import inventory
 
 		sent = []
 		with patch("medusync.outbound.send", side_effect=lambda *a, **k: sent.append((a, k))):
@@ -225,7 +225,7 @@ class TestThePush(WarehouseCase):
 		# ids matched, Medusa's idempotency would drop the second.
 		self._site("wh-p5", [(self.wh_a, "sloc_a"), (self.wh_b, "sloc_b")])
 		self._disable_others()
-		from medusync.handlers.risitex import inventory
+		from medusync.handlers.commerce import inventory
 
 		sent = []
 		with patch("medusync.outbound.send", side_effect=lambda *a, **k: sent.append(a)):
@@ -238,7 +238,7 @@ class TestThePush(WarehouseCase):
 	def test_an_unmapped_warehouse_pushes_nothing(self):
 		self._site("wh-p3", [(self.wh_a, "sloc_one")])
 		self._disable_others()
-		from medusync.handlers.risitex import inventory
+		from medusync.handlers.commerce import inventory
 
 		sent = []
 		with patch("medusync.outbound.send", side_effect=lambda *a, **k: sent.append(k)):
@@ -248,7 +248,7 @@ class TestThePush(WarehouseCase):
 	def test_the_quantity_is_still_sellable_not_raw_stock(self):
 		self._site("wh-p4", [(self.wh_a, "sloc_one")])
 		self._disable_others()
-		from medusync.handlers.risitex import inventory
+		from medusync.handlers.commerce import inventory
 
 		sent = []
 		with patch("medusync.outbound.send", side_effect=lambda *a, **k: sent.append((a, k))):

@@ -3,7 +3,7 @@
 
 """Handler packs are opt-in per site via `site_config.json`:
 
-    "medusync_handler_packs": ["risitex"]
+    "medusync_handler_packs": ["commerce"]
 
 Nothing domain-specific may load unless the site asks for it, and the
 mapped-push receiver resolves its upsert from the configured pack instead
@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - older frappe
 	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
 from medusync import handlers
+from medusync.tests import probe_pack
 
 CONF_KEY = handlers.CONF_KEY
 
@@ -44,35 +45,48 @@ class TestHandlerPacks(IntegrationTestCase):
 
 	def test_default_pack_when_site_config_is_silent(self):
 		self._set(None)
-		self.assertEqual(handlers.configured_packs(), ["polemarch"])
+		self.assertEqual(handlers.configured_packs(), ["commerce"])
 
 	def test_site_config_list_selects_packs(self):
-		self._set(["risitex"])
-		self.assertEqual(handlers.configured_packs(), ["risitex"])
+		self._set(["commerce"])
+		self.assertEqual(handlers.configured_packs(), ["commerce"])
 		registered = handlers.list_registered()
 		self.assertIn("order.return_requested", registered)
 		self.assertNotIn("customer.synced", registered)
 
 	def test_site_config_string_is_split(self):
-		self._set("polemarch, risitex")
-		self.assertEqual(handlers.configured_packs(), ["polemarch", "risitex"])
-		registered = handlers.list_registered()
-		self.assertIn("customer.synced", registered)
-		self.assertIn("order.return_requested", registered)
+		with probe_pack.installed():
+			self._set("commerce, probe")
+			self.assertEqual(handlers.configured_packs(), ["commerce", "probe"])
+			registered = handlers.list_registered()
+			self.assertIn(probe_pack.EVENT, registered)
+			self.assertIn("order.return_requested", registered)
 
 	def test_switching_packs_reloads_registry(self):
-		self._set(["polemarch"])
-		self.assertIn("customer.synced", handlers.list_registered())
-		self._set(["risitex"])
-		self.assertNotIn("customer.synced", handlers.list_registered())
+		with probe_pack.installed():
+			self._set(["probe"])
+			self.assertIn(probe_pack.EVENT, handlers.list_registered())
+			self._set(["commerce"])
+			self.assertNotIn(probe_pack.EVENT, handlers.list_registered())
 
 	def test_mapped_upsert_resolves_from_configured_pack(self):
-		self._set(["risitex"])
-		fn = handlers.get_mapped_upsert()
-		self.assertEqual(fn.__module__, "medusync.handlers.risitex.mapped")
-		self._set(["polemarch"])
-		fn = handlers.get_mapped_upsert()
-		self.assertEqual(fn.__module__, "medusync.handlers.polemarch.order")
+		with probe_pack.installed():
+			self._set(["commerce"])
+			fn = handlers.get_mapped_upsert()
+			self.assertEqual(fn.__module__, "medusync.handlers.commerce.mapped")
+			self._set(["probe"])
+			fn = handlers.get_mapped_upsert()
+			self.assertIs(fn, probe_pack.upsert)
+
+	def test_the_first_pack_that_offers_an_upsert_wins(self):
+		"""Load order is the site's, and the registry keeps it."""
+		with probe_pack.installed():
+			self._set(["probe", "commerce"])
+			self.assertIs(handlers.get_mapped_upsert(), probe_pack.upsert)
+			self._set(["commerce", "probe"])
+			self.assertEqual(
+				handlers.get_mapped_upsert().__module__, "medusync.handlers.commerce.mapped"
+			)
 
 	def test_no_pack_means_no_mapped_upsert(self):
 		self._set([])
@@ -81,6 +95,6 @@ class TestHandlerPacks(IntegrationTestCase):
 		self.assertEqual(handlers.list_registered(), [])
 
 	def test_unknown_pack_is_skipped_not_fatal(self):
-		self._set(["does_not_exist", "risitex"])
+		self._set(["does_not_exist", "commerce"])
 		registered = handlers.list_registered()
 		self.assertIn("order.return_requested", registered)

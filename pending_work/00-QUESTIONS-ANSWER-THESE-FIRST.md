@@ -57,8 +57,9 @@ far easier to sync than a balance plus a ledger.
 > **Answer:**
 
 **Q3. `Customer.wallet_balance_paise` still exists on the ERPNext side with
-nothing writing to it, left over from `risitex_erp`. Keep it as the landing
-place, or drop it now that you are building a proper app?**
+nothing writing to it, left over from the custom app that was uninstalled.
+Keep it as the landing place, or drop it now that you are building a proper
+app?**
 (a) Keep
 (b) ★ Drop it — a field the new app does not own is a trap
 
@@ -356,9 +357,9 @@ repo against `master` / `main`
 
 > **Answer:**
 
-**Q24. Which client goes first — Polemarch, Splendax, or a fresh site?**
-★ A fresh site: everything built since Phase 6 is written for the second
-client and none of it has met one.
+**Q24. Which deployment goes first — an existing one, or a fresh site?**
+★ A fresh site: everything built since Phase 6 is written for a second
+deployment and none of it has met one.
 
 > **Answer:**
 

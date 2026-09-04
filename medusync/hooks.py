@@ -2,7 +2,7 @@ app_name = "medusync"
 app_title = "Medusync"
 app_publisher = "Mithtech Innovative Solutions PVT LTD"
 app_description = "Two-way sync between a Frappe/ERPNext site and a Medusa v2 backend."
-app_email = "manoj@polemarch.in"
+app_email = "mithtech.is@gmail.com"
 app_license = "mit"
 
 # The handler packs (inventory, pricing, fulfilment, returns) reach into

@@ -9,8 +9,8 @@ The mapped push keys on these (`medusa_customer_id`, `medusa_order_id`,
 used to be created by hand on each site; a rebuild lost them. Idempotent
 (`update=True`) and skipped for doctypes the site does not have.
 
-Deliberately NOT Polemarch's securities doctypes — see the note in
-patches.txt about the v1_0 patch.
+Only standard ERPNext doctypes. A client app's own doctypes are that
+app's business, not this one's.
 """
 
 import frappe
