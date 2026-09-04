@@ -151,10 +151,54 @@ def _receive(default_kind: str | None = None):
 
 
 def _legacy_secret_matches(raw: bytes, provided: str | None) -> bool:
-	"""Fallback for a site that has not been migrated to a Medusync Site
-	record yet: the Single's inbound secret still verifies."""
+	"""The Single's inbound secret, from before stores had their own.
+
+	This is the one place where "which store is this?" is answered by
+	something other than the signature, which is the property the rest of
+	the multi-site design rests on. A request that gets in this way is
+	accepted whichever store it claims to be from and is recorded against
+	`default`, because nothing can attribute it.
+
+	It stays because a site mid-upgrade signs with it and dropping that
+	traffic would be worse. What it no longer does is stay quiet: using it
+	marks the store it was attributed to, so an operator can see which one
+	has not been repaired. The switch turns it off once nothing needs it.
+	"""
+	try:
+		if not config.settings().get("allow_legacy_secret"):
+			return False
+	except Exception:
+		# Settings unreadable (pre-migrate): behave as it always did.
+		pass
 	secret = config.get_secret("inbound_secret")
-	return bool(secret and provided and verify(raw, secret, provided))
+	if not (secret and provided and verify(raw, secret, provided)):
+		return False
+	_warn_legacy_secret(sites.default_site() and sites.default_site().get("name"))
+	return True
+
+
+def _warn_legacy_secret(site_name: str | None) -> None:
+	"""Say that the old key was used, where somebody will see it.
+
+	Never raises. This runs inside the authentication path and a failure
+	to warn must not become a failure to authenticate.
+	"""
+	message = (
+		"Authenticated with the Single's inbound secret rather than a store's own. "
+		"That secret is not scoped to any store. Repair this store's secrets and then "
+		"turn off 'Accept The Old Single Secret' in Medusync Settings."
+	)
+	try:
+		if site_name:
+			frappe.db.set_value(
+				sites.SITE_DOCTYPE, site_name, "last_error", message, update_modified=False
+			)
+	except Exception:
+		pass
+	try:
+		frappe.log_error(title="Medusync: the old Single secret was used", message=message)
+	except Exception:
+		pass
 
 
 def _origin_ref(env, site_id: str) -> str:

@@ -15,6 +15,7 @@
   "inbound_secret",
   "column_break_sec",
   "outbound_secret",
+  "allow_legacy_secret",
   "delivery_section",
   "use_background_jobs",
   "max_attempts",
@@ -46,7 +47,7 @@
    "label": "Connection"
   },
   {
-   "description": "Base URL of the Medusa backend, no trailing slash. e.g. https://admin.example.com",
+   "description": "Base URL of the Medusa backend, no trailing slash. e.g. https://admin.example.com Superseded by Medusync Site: delivery reads the store's own record, and an inbound request is attributed to a store by its signature. Kept for a site that has not finished migrating.",
    "fieldname": "medusa_url",
    "fieldtype": "Data",
    "label": "Medusa URL",
@@ -54,7 +55,7 @@
   },
   {
    "default": "/webhooks/erpnext-inbound",
-   "description": "Path on the Medusa backend that receives our outbound events.",
+   "description": "Path on the Medusa backend that receives our outbound events. Superseded by Medusync Site: delivery reads the store's own record, and an inbound request is attributed to a store by its signature. Kept for a site that has not finished migrating.",
    "fieldname": "inbound_path",
    "fieldtype": "Data",
    "label": "Medusa Inbound Path"
@@ -84,7 +85,7 @@
    "collapsible": 1
   },
   {
-   "description": "Medusa signs requests TO this site with this secret. Must match the Medusa plugin's webhook_secret.",
+   "description": "Medusa signs requests TO this site with this secret. Must match the Medusa plugin's webhook_secret. Superseded by Medusync Site: delivery reads the store's own record, and an inbound request is attributed to a store by its signature. Kept for a site that has not finished migrating.",
    "fieldname": "inbound_secret",
    "fieldtype": "Password",
    "label": "Inbound Secret (Medusa → here)"
@@ -94,7 +95,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "This site signs requests TO Medusa with this secret. Must match the Medusa plugin's frappe_to_medusa_secret.",
+   "description": "This site signs requests TO Medusa with this secret. Must match the Medusa plugin's frappe_to_medusa_secret. Superseded by Medusync Site: delivery reads the store's own record, and an inbound request is attributed to a store by its signature. Kept for a site that has not finished migrating.",
    "fieldname": "outbound_secret",
    "fieldtype": "Password",
    "label": "Outbound Secret (here → Medusa)"
@@ -202,6 +203,13 @@
    "label": "Default Mappings Version",
    "read_only": 1,
    "description": "Which shipped mapping set this site has. Written when the defaults are restored; 0 means they have never been installed. The defaults arrive switched off, so restoring them never changes what the site does until somebody rehearses and enables each one."
+  },
+  {
+   "default": "1",
+   "fieldname": "allow_legacy_secret",
+   "fieldtype": "Check",
+   "label": "Accept The Old Single Secret",
+   "description": "From before Medusync Site existed, when one secret authenticated everything. A request signed with it is accepted whichever store it claims to be from, and is recorded against 'default' because nothing can attribute it — so a leak here is the whole installation, not one store. It stays on by default because a site mid-upgrade still signs with it. Turn it off once every store has delivered successfully with its own secret (check Last Seen At on each one)."
   }
  ],
  "issingle": 1,
