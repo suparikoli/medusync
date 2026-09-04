@@ -27,6 +27,7 @@
   "pricing_selling_price_list",
   "selection_section",
   "products_doctype",
+  "allow_medusa_catalogue_updates",
   "column_break_selection",
   "selection_doctypes"
  ],
@@ -185,6 +186,13 @@
    "options": "Medusync Selection DocType",
    "label": "Also Under Selection",
    "description": "Other DocTypes whose documents carry the selector. The catalogue is always included."
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_medusa_catalogue_updates",
+   "fieldtype": "Check",
+   "label": "Medusa May Update Catalogue Fields",
+   "description": "Off by default: ERPNext owns the catalogue, so an inbound change to a record that already exists here is skipped rather than applied. Turn it on only where the storefront is genuinely the better source for those fields. It never licenses deletion — a Medusa product delete always unlinks the record and leaves it, its stock and its history untouched."
   }
  ],
  "issingle": 1,

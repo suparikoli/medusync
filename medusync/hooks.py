@@ -37,9 +37,19 @@ doc_events = {
 		"on_update": "medusync.mapping_sync.on_mapping_update",
 		"on_trash": "medusync.mapping_sync.on_mapping_trash",
 	},
+	# A site carries the warehouse and price-list maps, so saving one
+	# invalidates three hot-path caches, not one.
 	"Medusync Site": {
-		"on_update": "medusync.sites.clear_cache",
-		"on_trash": "medusync.sites.clear_cache",
+		"on_update": [
+			"medusync.sites.clear_cache",
+			"medusync.warehouses.clear_cache",
+			"medusync.price_lists.clear_cache",
+		],
+		"on_trash": [
+			"medusync.sites.clear_cache",
+			"medusync.warehouses.clear_cache",
+			"medusync.price_lists.clear_cache",
+		],
 	},
 }
 

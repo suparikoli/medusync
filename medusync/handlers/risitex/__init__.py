@@ -28,17 +28,36 @@ MAPPED_UPSERT = "medusync.handlers.risitex.mapped.upsert_via_mapping"
 # Document events this pack acts on. The core binds nothing for these
 # doctypes; a site without this pack runs none of it.
 #
-#   Stock Ledger Entry / Sales Order  -> stock level (actual - reserved - safety)
+#   Stock Ledger Entry / Sales Order  -> stock level, per mapped warehouse
+#   Sales Order / Payment Entry       -> order source + what has been paid
 #   Delivery Note / Shipment / Sales Invoice -> the post-order reverse path
 #   Item Price / Item / Customer      -> price, MOQ and customer group
 OUTBOUND_HOOKS = {
 	"Stock Ledger Entry": {
 		"after_insert": "medusync.handlers.risitex.inventory.on_sle",
 	},
+	# Two callables, both wanted: one re-pushes the stock the order
+	# reserves, the other reports where the order came from and what has
+	# been paid. A single dotted path here would silently drop one.
 	"Sales Order": {
-		"on_submit": "medusync.handlers.risitex.inventory.on_sales_order",
-		"on_cancel": "medusync.handlers.risitex.inventory.on_sales_order",
-		"on_update_after_submit": "medusync.handlers.risitex.inventory.on_sales_order",
+		"on_submit": [
+			"medusync.handlers.risitex.inventory.on_sales_order",
+			"medusync.order_meta.on_sales_order",
+		],
+		"on_cancel": [
+			"medusync.handlers.risitex.inventory.on_sales_order",
+			"medusync.order_meta.on_sales_order",
+		],
+		"on_update_after_submit": [
+			"medusync.handlers.risitex.inventory.on_sales_order",
+			"medusync.order_meta.on_sales_order",
+		],
+	},
+	# Money received by bank transfer, cheque or UPI never touches Medusa,
+	# so the storefront only learns of it from here.
+	"Payment Entry": {
+		"on_submit": "medusync.order_meta.on_payment_entry",
+		"on_cancel": "medusync.order_meta.on_payment_entry",
 	},
 	"Delivery Note": {
 		"on_submit": "medusync.handlers.risitex.reverse.on_delivery_note",

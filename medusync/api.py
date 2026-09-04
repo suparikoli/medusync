@@ -33,7 +33,7 @@ import time as _time
 
 import frappe
 
-from medusync import config, echo, envelope, mapping_sync, sites
+from medusync import catalogue, config, echo, envelope, mapping_sync, sites
 from medusync.handlers import dispatch as handlers_dispatch
 from medusync.signing import EVENT_ID_HEADER, SIGNATURE_HEADER, verify
 
@@ -208,6 +208,25 @@ def _apply_mapped(env, event_id: str, site_id: str):
 			message="missing key/value",
 			doctype=env.doctype,
 			key_field=env.key_field,
+		)
+
+	# ERPNext owns the catalogue. An update to a record that is already
+	# here is held back unless an operator allowed it, and a delete never
+	# destroys one — it unlinks. Refusing is a *skip*, not a failure: a
+	# 5xx here would put the sender into a retry loop that can never
+	# succeed.
+	verdict = catalogue.guard(env.doctype, env.key_field, env.key_value, env.event)
+	if verdict.blocked:
+		log = _new_log(env, event_id, site_id, doctype=env.doctype)
+		_close(log, "Skipped", document_name=verdict.document, action="skipped")
+		frappe.db.commit()
+		return _respond(
+			200,
+			ok=True,
+			status="skipped",
+			event=env.event,
+			event_id=event_id,
+			result=verdict.as_result(),
 		)
 
 	from medusync.handlers import get_mapped_upsert
@@ -462,6 +481,14 @@ def apply_inbound(mapping, envelope_raw: dict) -> dict:
 			existing = key_value if frappe.db.exists(mapping.document_type, key_value) else None
 		else:
 			existing = frappe.db.get_value(mapping.document_type, {key_field: key_value}, "name")
+
+	# Same guard as the mapped path, one level down, because a generic
+	# mapping can carry a delete straight into frappe.delete_doc.
+	verdict = catalogue.guard(
+		mapping.document_type, key_field, key_value, envelope_raw.get("event")
+	)
+	if verdict.blocked:
+		return {"status": "Skipped", "reason": verdict.reason, "name": verdict.document}
 
 	if envelope_raw.get("event", "").endswith(".deleted"):
 		if not mapping.allow_delete:

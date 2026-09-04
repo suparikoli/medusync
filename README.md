@@ -242,6 +242,103 @@ Defaults are deliberate. Turning selection on must not silently stop a
 store that was syncing perfectly well, so a document nobody has touched is
 allowed, and an empty store list falls back to the checkbox.
 
+## Stock across warehouses
+
+One ERPNext site holds stock in several warehouses; each store keeps its
+own stock locations. The pairing is per store, on **Medusync Site →
+Warehouses**:
+
+| Column | Means |
+|---|---|
+| Warehouse | the ERPNext warehouse whose sellable stock this store sees |
+| Medusa Stock Location ID | where it lands over there; blank lets the store choose |
+| Enabled | untick to stop sending, without forgetting the pairing |
+
+The same warehouse can appear on several stores under different location
+ids, and one store can draw on several warehouses. What travels is
+**sellable** stock, not raw quantity:
+
+    sellable = max(0, actual - reserved - safety_stock)
+
+ERPNext stays the single reservation authority, so a Medusa store is
+never told about stock that a Sales Order has already promised.
+
+A store with no rows falls back to **Medusync Settings → Inventory Source
+Warehouse**, exactly as before the map existed. Rows that exist but are
+switched off are still a map: a store that unticked its only warehouse is
+saying "send me nothing", not "go back to the global default".
+
+## Price lists
+
+Prices are two-way by default, but each Price List decides for itself, per
+store, on **Medusync Site → Price Lists**:
+
+| Column | Means |
+|---|---|
+| Price List | the ERPNext list |
+| Direction | Two-way, To Medusa, From Medusa, or Don't Sync |
+| Role | Base Price (the price on the shelf) or Tier Price (a B2B tier) |
+| Medusa Tier Code | which tier, for a Tier Price |
+
+The role is per store because the same list means different things in
+different places: a wholesale list can be the shelf price on a trade
+store and a customer tier on the retail one. A cost list marked **Don't
+Sync** stays documented and moves nothing.
+
+Only the outbound half is wired today: `To Medusa` and `Two-way` send,
+`From Medusa` and `Don't Sync` send nothing. Medusa writing a price back
+into an Item Price is not built yet, so `From Medusa` currently means
+"ERPNext keeps out of it" rather than "Medusa drives it".
+
+A store with no rows keeps what it had: the Settings selling price list
+as its base price, and the `medusa_customer_tier` field on Price List for
+its tiers.
+
+## Orders: where they came from and what was paid
+
+Two things a storefront cannot work out for itself.
+
+**Source.** Once a web order and a phone order are both Sales Orders they
+are indistinguishable. Medusa sends its sales channel, it lands in `Sales
+Order.medusa_order_source`, and submitting the order reports it back as
+`order.source.set` so the store can say which it was. An order raised in
+ERPNext reports `erpnext`.
+
+**Payments.** Money that arrives by transfer, cheque or UPI never touches
+Medusa. A submitted Payment Entry sends `order.payment.set` for each
+order it is allocated against, carrying what was allocated to *that*
+order rather than the size of the whole receipt. The store files each one
+under the Payment Entry that produced it, so three transfers against one
+order are three receipts and a re-send overwrites only its own. Cancelling
+the Payment Entry marks its receipt cancelled and drops it from the total;
+the row stays, because somebody will ask where the money went.
+
+Both land in the Medusa order's **metadata**, not in Medusa payment
+records. ERPNext is the accounting authority here, and a payment record no
+captured transaction backs would put a figure in the storefront ledger
+that nothing reconciles.
+
+## The catalogue is ERPNext's
+
+Two rules that no mapping can sign away:
+
+- **An update to a record that already exists here is skipped**, unless
+  **Medusync Settings → Medusa May Update Catalogue Fields** is on.
+  Carrying `title` in both directions is a reasonable mapping to
+  configure; the person who configured it was thinking about new
+  products, not about the description someone in purchasing wrote.
+- **A Medusa delete never deletes the Item.** It unlinks: the record keeps
+  its stock, its purchase history and its ledger entries, and simply stops
+  claiming a Medusa product. There is no setting for this. Disabling would
+  be nearly as bad — ERPNext would stop letting anyone transact against it.
+
+Creating is not affected: whether a Medusa-origin product may become a
+record at all is the plugin's product policy (off / link / create).
+
+A refusal comes back as a **skip**, not a failure, so the sender records
+"nothing to do" and stops. Returning an error would put the event into a
+retry loop that could never succeed.
+
 ## Loop prevention
 
 An inbound write is an ordinary document save, so it would fire the

@@ -1,56 +1,72 @@
 # Pricing + B2B: ERPNext -> Medusa. ERPNext price always wins.
-#   Item Price -> variant.price.set   (selling price list only)
-#   Item       -> variant.meta.set    (MOQ = min_order_qty)
-#   Customer   -> customer.group.set  (B2B customer group)
+#   Item Price -> variant.price.set        (lists a store maps as a base price)
+#   Item Price -> variant.tier_price.set   (lists a store maps as a B2B tier)
+#   Item       -> variant.meta.set         (MOQ = min_order_qty)
+#   Customer   -> customer.group.set       (B2B customer group)
+#
+# Which price list is which is per store, not per site: the same list can be
+# the shelf price at one store and a wholesale tier at another, and a cost
+# list can be marked Don't Sync so it never leaves. See medusync.price_lists.
 
 import frappe
 
-from medusync import config
+from medusync import config, price_lists
 from medusync.outbound import emit
-
-DEFAULT_SELLING_PL = "Standard Selling"
 
 
 def _guard():
     return not frappe.flags.get("medusync_inbound") and config.is_enabled()
 
 
-def _selling_pl():
-    return getattr(config.settings(), "pricing_selling_price_list", None) or DEFAULT_SELLING_PL
-
-
-def _deliver(event, payload, ref, doctype, docname):
+def _deliver(event, payload, ref, doctype, docname, per_site=None):
     """Log + hand off through the shared channel (queued by default, with
     the same retry/backoff as mapped events). Runs inside a doc event, so
     the outbound HTTP call must never happen inline here."""
-    emit(event, payload, ref=ref, doctype=doctype, docname=docname)
+    emit(event, payload, ref=ref, doctype=doctype, docname=docname, per_site=per_site)
 
 
 def on_item_price(doc, method=None):
+    """One Item Price can mean different things to different stores, so the
+    rules are resolved first and the stores are grouped by what they asked
+    for. A store that mapped nothing hears nothing."""
     try:
         if not _guard():
             return
+        rules = price_lists.rules_for(doc.price_list)
+        if not rules:
+            return
         deleted = method == "on_trash"
-        # Selling price list -> the variant base price (unchanged).
-        if doc.price_list == _selling_pl():
+        ref = "%s-%s" % (doc.name, method)
+
+        base_stores = {r["site_id"] for r in rules if r["role"] == price_lists.ROLE_BASE}
+        if base_stores:
             payload = {
                 "sku": doc.item_code,
+                "price_list": doc.price_list,
                 "amount": float(doc.price_list_rate or 0),
                 "currency": doc.currency,
                 "valid_from": str(doc.get("valid_from") or ""),
                 "valid_upto": str(doc.get("valid_upto") or ""),
                 "deleted": bool(deleted),
             }
-            _deliver("variant.price.set", payload, "%s-%s" % (doc.name, method), "Item Price", doc.name)
-            return
-        # Any OTHER price list mapped to a Medusa customer tier (via the
-        #  Custom Field holding the tier code) -> a B2B
-        # tier price. Price lists without the mapping are ignored, as before.
-        tier_code = frappe.db.get_value("Price List", doc.price_list, "medusa_customer_tier")
-        if tier_code:
+            _deliver(
+                "variant.price.set",
+                payload,
+                ref,
+                "Item Price",
+                doc.name,
+                per_site=lambda site_id, body: body if site_id in base_stores else None,
+            )
+
+        tier_codes = {
+            r["site_id"]: r["tier_code"]
+            for r in rules
+            if r["role"] == price_lists.ROLE_TIER and r["tier_code"]
+        }
+        if tier_codes:
             payload = {
                 "sku": doc.item_code,
-                "tier_code": tier_code,
+                "price_list": doc.price_list,
                 "amount": float(doc.price_list_rate or 0),
                 "currency": doc.currency,
                 # packing_unit (units per pack) is the volume bracket: several
@@ -59,7 +75,16 @@ def on_item_price(doc, method=None):
                 "min_quantity": int(doc.get("packing_unit") or 1),
                 "deleted": bool(deleted),
             }
-            _deliver("variant.tier_price.set", payload, "%s-%s" % (doc.name, method), "Item Price", doc.name)
+            _deliver(
+                "variant.tier_price.set",
+                payload,
+                ref,
+                "Item Price",
+                doc.name,
+                per_site=lambda site_id, body: (
+                    {**body, "tier_code": tier_codes[site_id]} if site_id in tier_codes else None
+                ),
+            )
     except Exception:
         frappe.log_error(title="medusync pricing on_item_price failed", message=frappe.get_traceback())
 

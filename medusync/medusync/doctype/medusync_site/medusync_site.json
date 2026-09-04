@@ -22,6 +22,9 @@
   "behaviour_section",
   "handler_pack",
   "column_break_behaviour",
+  "mapping_section",
+  "warehouses",
+  "price_lists",
   "health_section",
   "last_seen_at",
   "column_break_health",
@@ -156,6 +159,26 @@
    "fieldtype": "Small Text",
    "label": "Last Error",
    "read_only": 1
+  },
+  {
+   "fieldname": "mapping_section",
+   "fieldtype": "Section Break",
+   "label": "What This Store Draws On",
+   "description": "Stock and prices are per store. Two stores can draw on the same warehouse under different stock-location ids, and the same price list can be the shelf price at one store and a B2B tier at another. Leave both empty to keep the single warehouse and single selling price list named in Medusync Settings."
+  },
+  {
+   "fieldname": "warehouses",
+   "fieldtype": "Table",
+   "label": "Warehouses",
+   "options": "Medusync Warehouse Map",
+   "description": "ERPNext warehouses whose sellable stock reaches this store, and the Stock Location each one feeds."
+  },
+  {
+   "fieldname": "price_lists",
+   "fieldtype": "Table",
+   "label": "Price Lists",
+   "options": "Medusync Price List Map",
+   "description": "Price lists this store sees, which way each one travels, and whether it is a base price or a customer tier."
   }
  ],
  "links": [],

@@ -222,7 +222,15 @@ def send(
 		deliver(**kwargs)
 
 
-def emit(event: str, payload: dict, *, ref: str, doctype: str | None = None, docname: str | None = None):
+def emit(
+	event: str,
+	payload: dict,
+	*,
+	ref: str,
+	doctype: str | None = None,
+	docname: str | None = None,
+	per_site=None,
+):
 	"""Log and send one event to every enabled site.
 
 	The single entry point for handler packs. It does what `dispatch`
@@ -230,17 +238,33 @@ def emit(event: str, payload: dict, *, ref: str, doctype: str | None = None, doc
 	secret and retry schedule, and the echo tag when this change was
 	itself caused by an inbound write — so a pack cannot accidentally
 	reach only one of several stores.
+
+	Stores do not always want the same body. `per_site(site_id, payload)`
+	returns the body that store should get, or None to leave it out
+	entirely. Stock is the clearest case: two stores can draw on the same
+	warehouse under different stock-location ids, so each has to be told
+	its own. Doing that in the handler instead would mean re-implementing
+	the log row, the echo tag and the selection filter once per handler.
+
+	`ref` is what keeps two events apart. It ends up in the event id, and
+	Medusa treats a repeated event id as a duplicate and drops it — so a
+	caller sending about the same document twice for different reasons
+	(two warehouses, say) must put the difference in `ref`.
 	"""
 	mark = echo.origin_of(doctype, docname) if doctype and docname else None
 	mark = mark or {}
-	payload_hash = hashlib.sha256(
-		json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-	).hexdigest()
 	targets = sites.all_sites()
 	if doctype and docname:
 		targets = selection.sites_allowed(doctype, docname, targets)
 	for site in targets:
 		site_id = site["site_id"]
+		body = per_site(site_id, payload) if per_site else payload
+		if body is None:
+			# This store did not ask for this one.
+			continue
+		payload_hash = hashlib.sha256(
+			json.dumps(body, sort_keys=True, default=str).encode("utf-8")
+		).hexdigest()
 		event_id = "frappe:%s:%s:%s" % (event, ref, site_id)
 		log = _create_log(
 			direction="Outbound",
@@ -251,13 +275,13 @@ def emit(event: str, payload: dict, *, ref: str, doctype: str | None = None, doc
 			document_name=docname,
 			payload_hash=payload_hash,
 			site=site_id,
-			request_body=payload,
+			request_body=body,
 		)
 		send(
 			log.name,
 			event,
 			event_id,
-			payload,
+			body,
 			site_id=site_id,
 			correlation_id=mark.get("correlation_id"),
 			echo_of=mark.get("origin"),

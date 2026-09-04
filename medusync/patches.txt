@@ -20,3 +20,4 @@ medusync.patches.v1_1.install_reference_fields
 medusync.patches.v1_2.create_default_site
 medusync.patches.v1_2.backfill_mapping_identity
 medusync.patches.v1_3.install_sync_selection
+medusync.patches.v1_4.install_order_source_field
