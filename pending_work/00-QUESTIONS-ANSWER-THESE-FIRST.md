@@ -258,6 +258,52 @@ Medusa keeps only `version` and `updated_by_user_id`. Worth an edit log?
 
 > **Answer:**
 
+### The field dictionary — `2026-09-07-field-equivalence-dictionary.md`
+
+Most of this exists as code: `canonical-mappings.ts` for whole (entity ×
+DocType) pairs, and `autofill.ts` with 28 synonym groups and a
+seven-rung confidence ladder. What is missing is that it cannot be edited,
+does not learn, and does not reach ERPNext at all.
+
+**Q31. Where should the dictionary live?**
+(a) ★ A DocType on ERPNext and a model on Medusa, synced by the mechanism
+mappings already use — uid, version, higher wins, ERPNext takes a tie
+(b) ERPNext owns it; Medusa reads it over the wire
+(c) Stay as code, and just widen the constants
+
+> **Answer:**
+
+**Q32. What scope should an entry have?**
+(a) Global only — `email` ↔ `email_id` everywhere
+(b) ★ Global, plus optional narrowing to an (entity, DocType) pair, plus
+optional narrowing to one site. Most rows are global; the ones that matter
+to a client are not
+(c) Per (entity, DocType) only
+
+> **Answer:**
+
+**Q33. When an operator corrects a suggested pairing, should the dictionary
+learn it?**
+That correction is the most reliable row anyone could write, and writing it
+back automatically is also how a dictionary fills with one client's habits.
+(a) ★ Record it as `suggested` from `operator`, and let somebody promote it
+to `confirmed` — learning that has to be agreed to
+(b) Write it straight in as confirmed
+(c) Never; the dictionary is edited by hand only
+
+> **Answer:**
+
+**Q34. Should selecting an entity and a DocType auto-fill the grid, or
+offer the rows?**
+Auto-filling is what was asked for and is faster. Offering makes the
+operator look at a `weak` guess before it becomes a mapping.
+(a) ★ Auto-fill everything at `synonym` or better; list the `weak` and
+`none` rows separately for the operator to accept
+(b) Auto-fill everything the matcher produces
+(c) Offer everything, accept nothing automatically
+
+> **Answer:**
+
 ---
 
 ## B. Decisions about what is already built

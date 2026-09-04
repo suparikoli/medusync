@@ -44,6 +44,7 @@ The working order is:
 | `2026-09-05-order-payment-status.md` | Q18 |
 | `2026-09-07-mapping-studio-parity.md` | Q27–Q28, Q30 |
 | `2026-09-07-medusa-field-discovery.md` | Q29 |
+| `2026-09-07-field-equivalence-dictionary.md` | Q31–Q34 |
 
 Wallet and credit line are a different kind of pending: they are not waiting
 on a decision so much as on two applications that do not exist yet. Their
