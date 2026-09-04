@@ -41,6 +41,10 @@ class DriftCase(IntegrationTestCase):
 		for name in self._made:
 			if frappe.db.exists(MAPPING, name):
 				frappe.delete_doc(MAPPING, name, force=1, ignore_permissions=True)
+		# `drift.check` commits, as a scheduled job should, so these
+		# fixtures are durable by the time the test ends and the usual
+		# rollback would undo the cleanup rather than the fixtures.
+		frappe.db.commit()
 		self._notify.stop()
 		self._push.stop()
 		super().tearDown()

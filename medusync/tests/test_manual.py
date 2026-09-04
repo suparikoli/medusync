@@ -36,6 +36,7 @@ class ManualCase(IntegrationTestCase):
 		self._push = patch("medusync.mapping_sync.push_mapping", return_value=None)
 		self._push.start()
 		self._rows = []
+		self._mappings = []
 		site = frappe.get_all("Medusync Site", fields=["site_id"], limit=1)
 		if not site:
 			self.skipTest("no Medusync Site configured")
@@ -45,6 +46,13 @@ class ManualCase(IntegrationTestCase):
 		for name in self._rows:
 			if frappe.db.exists(LOG, name):
 				frappe.delete_doc(LOG, name, force=1, ignore_permissions=True)
+		for name in self._mappings:
+			if frappe.db.exists(MAPPING, name):
+				frappe.delete_doc(MAPPING, name, force=1, ignore_permissions=True)
+		# `resync_failed` commits, so these rows outlive the test's own
+		# transaction and the cleanup has to as well. Everything that must
+		# be gone has to be deleted BEFORE this line -- addCleanup runs
+		# after tearDown, so anything cleaned up there is rolled back.
 		self._push.stop()
 		super().tearDown()
 
@@ -118,10 +126,7 @@ class TestPushingEverything(ManualCase):
 		doc.update(spec)
 		doc.append("field_map", {"frappe_field": "customer_name", "medusa_path": "name"})
 		doc.insert(ignore_permissions=True)
-		self.addCleanup(
-			lambda: frappe.db.exists(MAPPING, doc.name)
-			and frappe.delete_doc(MAPPING, doc.name, force=1, ignore_permissions=True)
-		)
+		self._mappings.append(doc.name)
 		return doc
 
 	def _enabled_mapping(self, **over):
