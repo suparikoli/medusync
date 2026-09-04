@@ -1,46 +1,11 @@
 __version__ = "0.1.0"
 
-
-# Register the Polemarch event-handler pack at module-import time.
-# Any process that imports medusync (e.g. on a webhook hit, or via
-# `frappe.call`) gets the handlers wired up before it dispatches.
-# `register_handler` is idempotent — re-registration is a no-op when
-# the handler is already there, so a future migration that calls
-# `after_install` won't double-register.
+# Handler packs (site-specific event handlers) are NOT registered here.
+# A site opts in through its `site_config.json`:
 #
-# To opt out (e.g. on a non-MISPL site that wants a clean Polemarch-
-# free medusync): set `medusync.skip_polemarch_handlers = True` in
-# `site_config.json`. The import guard below reads it.
-import os
-
-if not os.environ.get("MEDUSYNC_SKIP_POLEMARCH"):
-	# The flag above is the test/operator escape hatch. The import path
-	# never touches a DB and never calls Frappe APIs, so it is safe in
-	# any process (request worker, scheduler, console, bench CLI).
-	try:
-		from medusync.handlers.polemarch import register as _register_polemarch
-		_register_polemarch()
-	except Exception:
-		# Don't break the medusync import if the Polemarch pack is
-		# missing or broken. The empty registry is still a valid
-		# medusync — inbound webhooks will return
-		# `{ok, skipped, "no_handler_for_event"}` for everything.
-		import frappe
-		frappe.log_error(
-			title="medusync: failed to register Polemarch handler pack",
-			message=frappe.get_traceback(),
-		)
-
-	# RISITEX handler pack — same import-time registration as above.
-	# Only the Medusa-initiated return request needs a registry handler
-	# (create_pending_return); the rest of the RISITEX site flows through
-	# the mapping receiver. Safe/idempotent; never touches the DB.
-	try:
-		from medusync.handlers.risitex import register as _register_risitex
-		_register_risitex()
-	except Exception:
-		import frappe
-		frappe.log_error(
-			title="medusync: failed to register RISITEX handler pack",
-			message=frappe.get_traceback(),
-		)
+#     "medusync_handler_packs": ["commerce"]
+#
+# and `medusync.handlers` builds the registry lazily on first use, so
+# importing this package never needs a site context. When the key is
+# absent the commerce pack loads.
+# See medusync/handlers/__init__.py.

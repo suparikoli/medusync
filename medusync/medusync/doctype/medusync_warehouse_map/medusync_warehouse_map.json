@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "creation": "2026-09-04 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "warehouse",
+  "location_id",
+  "enabled"
+ ],
+ "fields": [
+  {
+   "columns": 5,
+   "description": "ERPNext warehouse whose sellable stock this store is told about.",
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Warehouse",
+   "options": "Warehouse",
+   "reqd": 1
+  },
+  {
+   "columns": 5,
+   "description": "The Stock Location id in this Medusa store. Leave blank to let the store choose its own, which is what the single-warehouse setting always did.",
+   "fieldname": "location_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Medusa Stock Location ID"
+  },
+  {
+   "columns": 1,
+   "default": "1",
+   "description": "Untick to stop sending this warehouse's levels to this store. The row is still a map, so the old single-warehouse setting does not come back.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-04 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Medusync",
+ "name": "Medusync Warehouse Map",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

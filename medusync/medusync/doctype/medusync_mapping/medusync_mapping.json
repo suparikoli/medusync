@@ -7,9 +7,13 @@
  "field_order": [
   "title",
   "enabled",
+  "attention",
   "column_break_head",
   "document_type",
+  "medusa_entity",
+  "site",
   "direction",
+  "source_of_truth",
   "outbound_section",
   "medusa_event",
   "docevents",
@@ -25,7 +29,20 @@
   "allow_update",
   "column_break_in",
   "allow_delete",
-  "submit_on_insert"
+  "submit_on_insert",
+  "testing_section",
+  "attention_detail",
+  "last_test_status",
+  "last_test_at",
+  "column_break_testing",
+  "tested_signature",
+  "shipped_signature",
+  "last_test_report",
+  "identity_section",
+  "mapping_uid",
+  "column_break_identity",
+  "version",
+  "last_synced_at"
  ],
  "fields": [
   {
@@ -42,7 +59,8 @@
    "fieldname": "enabled",
    "fieldtype": "Check",
    "in_list_view": 1,
-   "label": "Enabled"
+   "label": "Enabled",
+   "description": "Turn this sync on or off without deleting it."
   },
   {
    "fieldname": "column_break_head",
@@ -54,7 +72,22 @@
    "in_list_view": 1,
    "label": "Document Type",
    "options": "DocType",
-   "reqd": 1
+   "reqd": 1,
+   "description": "The ERPNext record type to sync, e.g. Customer, Item, Sales Order."
+  },
+  {
+   "fieldname": "medusa_entity",
+   "fieldtype": "Data",
+   "label": "Medusa Entity",
+   "description": "What this doctype is called on the Medusa side: customer, product, order, and so on. Used to pair the two copies of this mapping."
+  },
+  {
+   "fieldname": "site",
+   "fieldtype": "Link",
+   "options": "Medusync Site",
+   "label": "Site",
+   "in_standard_filter": 1,
+   "description": "Limit this mapping to one Medusa site. Leave blank to apply it to every connected site."
   },
   {
    "default": "Two-way",
@@ -67,10 +100,18 @@
    "reqd": 1
   },
   {
+   "fieldname": "source_of_truth",
+   "fieldtype": "Select",
+   "options": "ERPNext\nMedusa",
+   "default": "ERPNext",
+   "label": "Source of Truth",
+   "description": "Which side wins when the same record changed on both. ERPNext by default."
+  },
+  {
    "depends_on": "eval:doc.direction != 'From Medusa'",
    "fieldname": "outbound_section",
    "fieldtype": "Section Break",
-   "label": "Outbound (this site \u2192 Medusa)"
+   "label": "Outbound (this site → Medusa)"
   },
   {
    "description": "Event name Medusa receives, e.g. customer.updated. Blank derives one from the doctype and docevent.",
@@ -132,19 +173,22 @@
    "depends_on": "eval:doc.direction != 'To Medusa'",
    "fieldname": "inbound_section",
    "fieldtype": "Section Break",
-   "label": "Inbound (Medusa \u2192 this site)"
+   "label": "Inbound (Medusa → this site)",
+   "collapsible": 1
   },
   {
    "default": "1",
    "fieldname": "allow_insert",
    "fieldtype": "Check",
-   "label": "Medusa May Create Records"
+   "label": "Medusa May Create Records",
+   "description": "Let Medusa create new records here when it sends one it hasn't seen before."
   },
   {
    "default": "1",
    "fieldname": "allow_update",
    "fieldtype": "Check",
-   "label": "Medusa May Update Records"
+   "label": "Medusa May Update Records",
+   "description": "Let Medusa update existing records here when they change on its side."
   },
   {
    "fieldname": "column_break_in",
@@ -152,7 +196,7 @@
   },
   {
    "default": "0",
-   "description": "Off by default on purpose \u2014 a delete arriving over HTTP is rarely what you want.",
+   "description": "Off by default on purpose — a delete arriving over HTTP is rarely what you want.",
    "fieldname": "allow_delete",
    "fieldtype": "Check",
    "label": "Medusa May Delete Records"
@@ -163,6 +207,110 @@
    "fieldname": "submit_on_insert",
    "fieldtype": "Check",
    "label": "Submit On Insert"
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Identity",
+   "collapsible": 1,
+   "description": "Set automatically. Both systems hold the same mapping under this id; the higher version wins when they disagree, and ERPNext wins a tie."
+  },
+  {
+   "fieldname": "mapping_uid",
+   "fieldtype": "Data",
+   "label": "Mapping UID",
+   "read_only": 1,
+   "unique": 1,
+   "no_copy": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Version",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "last_synced_at",
+   "fieldtype": "Datetime",
+   "label": "Last Synced At",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "testing_section",
+   "fieldtype": "Section Break",
+   "label": "Rehearsal",
+   "description": "A mapping goes live only after somebody has seen it work. Use Test in the toolbar: it shows what would be sent and what an arriving payload would do, writes nothing, and switches the mapping on if it held up."
+  },
+  {
+   "default": "Untested",
+   "fieldname": "last_test_status",
+   "fieldtype": "Select",
+   "label": "Last Rehearsal",
+   "options": "Untested\nPassed\nFailed",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "last_test_at",
+   "fieldtype": "Datetime",
+   "label": "Rehearsed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_testing",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tested_signature",
+   "fieldtype": "Data",
+   "label": "Rehearsed Signature",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Fingerprint of what this mapping does — doctype, direction, key and field map. Changing any of those means the rehearsal no longer describes it; changing the title or ticking Enabled does not."
+  },
+  {
+   "fieldname": "last_test_report",
+   "fieldtype": "Code",
+   "label": "Rehearsal Report",
+   "options": "JSON",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "attention",
+   "fieldtype": "Select",
+   "label": "Needs Attention",
+   "options": "\nMapping Required\nField Missing",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "no_copy": 1,
+   "description": "Set when something needs a decision. Mapping Required: the shipped defaults changed and this one was edited, so it was left alone. Field Missing: it names a field the DocType no longer has, and it has been switched off."
+  },
+  {
+   "depends_on": "attention",
+   "fieldname": "attention_detail",
+   "fieldtype": "Small Text",
+   "label": "What Needs Deciding",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "shipped_signature",
+   "fieldtype": "Data",
+   "label": "Shipped Signature",
+   "read_only": 1,
+   "hidden": 1,
+   "no_copy": 1,
+   "description": "Fingerprint of this mapping as it was installed, for mappings that came from the shipped default set. An upgrade compares it with the current fingerprint: the same means nobody has touched it and the new default may be applied; different means somebody has, and the upgrade says so instead."
   }
  ],
  "links": [],

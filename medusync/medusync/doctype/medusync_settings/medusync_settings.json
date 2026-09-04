@@ -15,12 +15,23 @@
   "inbound_secret",
   "column_break_sec",
   "outbound_secret",
+  "allow_legacy_secret",
   "delivery_section",
   "use_background_jobs",
   "max_attempts",
   "column_break_del",
   "log_retention_days",
-  "log_payloads"
+  "log_payloads",
+  "packs_section",
+  "inventory_source_warehouse",
+  "column_break_packs",
+  "pricing_selling_price_list",
+  "selection_section",
+  "products_doctype",
+  "allow_medusa_catalogue_updates",
+  "defaults_version",
+  "column_break_selection",
+  "selection_doctypes"
  ],
  "fields": [
   {
@@ -36,7 +47,7 @@
    "label": "Connection"
   },
   {
-   "description": "Base URL of the Medusa backend, no trailing slash. e.g. https://admin.example.com",
+   "description": "Base URL of the Medusa backend, no trailing slash. e.g. https://admin.example.com Superseded by Medusync Site: delivery reads the store's own record, and an inbound request is attributed to a store by its signature. Kept for a site that has not finished migrating.",
    "fieldname": "medusa_url",
    "fieldtype": "Data",
    "label": "Medusa URL",
@@ -44,7 +55,7 @@
   },
   {
    "default": "/webhooks/erpnext-inbound",
-   "description": "Path on the Medusa backend that receives our outbound events.",
+   "description": "Path on the Medusa backend that receives our outbound events. Superseded by Medusync Site: delivery reads the store's own record, and an inbound request is attributed to a store by its signature. Kept for a site that has not finished migrating.",
    "fieldname": "inbound_path",
    "fieldtype": "Data",
    "label": "Medusa Inbound Path"
@@ -57,7 +68,8 @@
    "default": "15",
    "fieldname": "request_timeout",
    "fieldtype": "Int",
-   "label": "Request Timeout (seconds)"
+   "label": "Request Timeout (seconds)",
+   "description": "How long to wait for Medusa to respond before giving up (seconds)."
   },
   {
    "default": "1",
@@ -69,28 +81,30 @@
   {
    "fieldname": "security_section",
    "fieldtype": "Section Break",
-   "label": "Shared Secrets"
+   "label": "Shared Secrets",
+   "collapsible": 1
   },
   {
-   "description": "Medusa signs requests TO this site with this secret. Must match the Medusa plugin's webhook_secret.",
+   "description": "Medusa signs requests TO this site with this secret. Must match the Medusa plugin's webhook_secret. Superseded by Medusync Site: delivery reads the store's own record, and an inbound request is attributed to a store by its signature. Kept for a site that has not finished migrating.",
    "fieldname": "inbound_secret",
    "fieldtype": "Password",
-   "label": "Inbound Secret (Medusa \u2192 here)"
+   "label": "Inbound Secret (Medusa → here)"
   },
   {
    "fieldname": "column_break_sec",
    "fieldtype": "Column Break"
   },
   {
-   "description": "This site signs requests TO Medusa with this secret. Must match the Medusa plugin's frappe_to_medusa_secret.",
+   "description": "This site signs requests TO Medusa with this secret. Must match the Medusa plugin's frappe_to_medusa_secret. Superseded by Medusync Site: delivery reads the store's own record, and an inbound request is attributed to a store by its signature. Kept for a site that has not finished migrating.",
    "fieldname": "outbound_secret",
    "fieldtype": "Password",
-   "label": "Outbound Secret (here \u2192 Medusa)"
+   "label": "Outbound Secret (here → Medusa)"
   },
   {
    "fieldname": "delivery_section",
    "fieldtype": "Section Break",
-   "label": "Delivery"
+   "label": "Delivery",
+   "collapsible": 1
   },
   {
    "default": "1",
@@ -101,7 +115,7 @@
   },
   {
    "default": "3",
-   "description": "Attempts per event before it is parked as failed. Retries are queued with backoff.",
+   "description": "Attempts per event before it is parked as failed. Between attempts the row waits 30 s, then 120 s, 270 s … and a once-a-minute sweep re-queues it.",
    "fieldname": "max_attempts",
    "fieldtype": "Int",
    "label": "Max Attempts"
@@ -112,7 +126,7 @@
   },
   {
    "default": "180",
-   "description": "Medusync Log rows older than this are deleted nightly. Default 180 days \u2014 comfortably past the three months needed to answer 'did this record ever sync, and what happened'. 0 keeps everything, but note these rows carry the synced payload.",
+   "description": "Medusync Log rows older than this are deleted nightly. Default 180 days — comfortably past the three months needed to answer 'did this record ever sync, and what happened'. 0 keeps everything, but note these rows carry the synced payload.",
    "fieldname": "log_retention_days",
    "fieldtype": "Int",
    "label": "Log Retention (days)"
@@ -123,11 +137,84 @@
    "fieldname": "log_payloads",
    "fieldtype": "Check",
    "label": "Log Payload Bodies"
+  },
+  {
+   "fieldname": "packs_section",
+   "fieldtype": "Section Break",
+   "label": "Inventory & Pricing (handler packs)",
+   "collapsible": 1,
+   "description": "Used by the commerce handler pack (site_config `medusync_handler_packs`). Ignored when that pack is not loaded."
+  },
+  {
+   "fieldname": "inventory_source_warehouse",
+   "fieldtype": "Link",
+   "label": "Inventory Source Warehouse",
+   "options": "Warehouse",
+   "description": "Warehouse whose sellable stock (actual − reserved − safety stock) is pushed to Medusa. Stock in other warehouses is ignored."
+  },
+  {
+   "fieldname": "column_break_packs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pricing_selling_price_list",
+   "fieldtype": "Link",
+   "label": "Selling Price List for Medusa",
+   "options": "Price List",
+   "description": "Item Prices on this list become the Medusa base price. Blank = Standard Selling. Other selling lists sync as B2B tier prices when they carry a Medusa Customer Tier code."
+  },
+  {
+   "fieldname": "selection_section",
+   "fieldtype": "Section Break",
+   "label": "Sync Selection",
+   "description": "ERPNext decides which documents are allowed to sync. Each DocType listed here gets a per-document selector: one checkbox while a single store is connected, a list of stores once there are several."
+  },
+  {
+   "fieldname": "products_doctype",
+   "fieldtype": "Link",
+   "options": "DocType",
+   "default": "Item",
+   "label": "Catalogue DocType",
+   "reqd": 1,
+   "description": "Which DocType holds your products. Item on a stock ERPNext. Changing it moves the selector onto the new DocType and tells every connected store."
+  },
+  {
+   "fieldname": "column_break_selection",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "selection_doctypes",
+   "fieldtype": "Table",
+   "options": "Medusync Selection DocType",
+   "label": "Also Under Selection",
+   "description": "Other DocTypes whose documents carry the selector. The catalogue is always included."
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_medusa_catalogue_updates",
+   "fieldtype": "Check",
+   "label": "Medusa May Update Catalogue Fields",
+   "description": "Off by default: ERPNext owns the catalogue, so an inbound change to a record that already exists here is skipped rather than applied. Turn it on only where the storefront is genuinely the better source for those fields. It never licenses deletion — a Medusa product delete always unlinks the record and leaves it, its stock and its history untouched."
+  },
+  {
+   "default": "0",
+   "fieldname": "defaults_version",
+   "fieldtype": "Int",
+   "label": "Default Mappings Version",
+   "read_only": 1,
+   "description": "Which shipped mapping set this site has. Written when the defaults are restored; 0 means they have never been installed. The defaults arrive switched off, so restoring them never changes what the site does until somebody rehearses and enables each one."
+  },
+  {
+   "default": "1",
+   "fieldname": "allow_legacy_secret",
+   "fieldtype": "Check",
+   "label": "Accept The Old Single Secret",
+   "description": "From before Medusync Site existed, when one secret authenticated everything. A request signed with it is accepted whichever store it claims to be from, and is recorded against 'default' because nothing can attribute it — so a leak here is the whole installation, not one store. It stays on by default because a site mid-upgrade still signs with it. Turn it off once every store has delivered successfully with its own secret (check Last Seen At on each one)."
   }
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-08-12 00:00:00.000000",
+ "modified": "2026-09-04 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Medusync",
  "name": "Medusync Settings",

@@ -34,7 +34,8 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Direction",
-   "options": "Two-way\nTo Medusa\nFrom Medusa"
+   "options": "Two-way\nTo Medusa\nFrom Medusa\nDon't Sync",
+   "description": "Which way this one field moves. Don't Sync keeps the pair documented but moves nothing — use it for fields one side owns outright."
   }
  ],
  "istable": 1,

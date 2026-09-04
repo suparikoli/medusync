@@ -10,6 +10,8 @@
   "column_break_head",
   "event",
   "event_id",
+  "is_test",
+  "site",
   "ref_section",
   "document_type",
   "document_name",
@@ -17,6 +19,7 @@
   "action",
   "payload_hash",
   "attempt",
+  "next_attempt_at",
   "status_code",
   "payload_section",
   "request_body",
@@ -39,8 +42,9 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Queued\nSuccess\nSkipped\nFailed",
-   "reqd": 1
+   "options": "Queued\nSuccess\nSkipped\nFailed\nPoison",
+   "reqd": 1,
+   "description": "Poison means every attempt was used up; it is never retried automatically."
   },
   {
    "fieldname": "column_break_head",
@@ -59,6 +63,15 @@
    "fieldtype": "Data",
    "label": "Event ID",
    "search_index": 1
+  },
+  {
+   "fieldname": "site",
+   "fieldtype": "Link",
+   "options": "Medusync Site",
+   "label": "Site",
+   "in_standard_filter": 1,
+   "in_list_view": 1,
+   "description": "Which Medusa site this row belongs to."
   },
   {
    "fieldname": "ref_section",
@@ -107,6 +120,14 @@
    "label": "Attempt"
   },
   {
+   "fieldname": "next_attempt_at",
+   "fieldtype": "Datetime",
+   "label": "Next Attempt At",
+   "read_only": 1,
+   "search_index": 1,
+   "description": "Set while a failed outbound delivery waits for its backoff. The once-a-minute retry sweep picks the row up when this time has passed."
+  },
+  {
    "fieldname": "status_code",
    "fieldtype": "Int",
    "label": "HTTP Status"
@@ -131,11 +152,20 @@
    "fieldname": "error",
    "fieldtype": "Small Text",
    "label": "Error"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_test",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Test Run",
+   "read_only": 1,
+   "description": "This row is a rehearsal from the mapping studio, not real traffic. The retry sweep skips it, it never suppresses a genuine event as a duplicate, it does not count as reaching the store, and it is pruned within a day."
   }
  ],
  "in_create": 1,
  "links": [],
- "modified": "2026-08-12 00:00:00.000000",
+ "modified": "2026-09-04 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Medusync",
  "name": "Medusync Log",

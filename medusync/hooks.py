@@ -2,17 +2,32 @@ app_name = "medusync"
 app_title = "Medusync"
 app_publisher = "Mithtech Innovative Solutions PVT LTD"
 app_description = "Two-way sync between a Frappe/ERPNext site and a Medusa v2 backend."
-app_email = "manoj@polemarch.in"
+app_email = "mithtech.is@gmail.com"
 app_license = "mit"
+
+# The handler packs (inventory, pricing, fulfilment, returns) reach into
+# ERPNext's stock and selling modules; a Frappe-only site cannot host them.
+required_apps = ["erpnext"]
 
 after_install = "medusync.install.after_install"
 
-# ── Outbound ─────────────────────────────────────────────────────────
-# A wildcard hook rather than a per-doctype list. Which doctypes are
-# actually synced is a runtime question answered from Medusync Mapping
-# rows, so an operator can add one from the Desk UI without an app
-# release. `on_doc_event` returns immediately when no mapping matches,
-# and the lookup is served from the request cache.
+# Two things every upgrade should do: bring the shipped mapping set up to
+# date without overwriting anybody's edits, and notice a mapping that has
+# gone stale. Both report rather than raise -- an operator whose site is
+# down after an upgrade does not upgrade again.
+after_migrate = "medusync.install.after_migrate"
+
+# ── Document events ──────────────────────────────────────────────────
+# One wildcard binding, and no business doctype named anywhere in this
+# file. Two runtime questions decide what actually happens on a save:
+#
+#   which doctypes sync   -> Medusync Mapping rows, editable in the Desk
+#   which domain code runs -> the handler packs this site opted into
+#                             (site_config.json → medusync_handler_packs)
+#
+# `on_doc_event` returns immediately when neither has anything to say, and
+# both lookups are served from a request-local cache, so the cost on an
+# unrelated save is a dict miss.
 doc_events = {
 	"*": {
 		"after_insert": "medusync.outbound.on_doc_event",
@@ -22,48 +37,42 @@ doc_events = {
 		"on_trash": "medusync.outbound.on_doc_event",
 		"on_update_after_submit": "medusync.outbound.on_doc_event",
 	},
-	"Stock Ledger Entry": {
-		"after_insert": "medusync.handlers.risitex.inventory.on_sle",
-	},
-	"Sales Order": {
-		"on_submit": "medusync.handlers.risitex.inventory.on_sales_order",
-		"on_cancel": "medusync.handlers.risitex.inventory.on_sales_order",
-		"on_update_after_submit": "medusync.handlers.risitex.inventory.on_sales_order",
-	},
-	"Delivery Note": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_delivery_note",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_delivery_note",
-	},
-	"Shipment": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_shipment",
-		"on_update_after_submit": "medusync.handlers.risitex.reverse.on_shipment",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_shipment",
-	},
-	"Sales Invoice": {
-		"on_submit": "medusync.handlers.risitex.reverse.on_sales_invoice",
-		"on_cancel": "medusync.handlers.risitex.reverse.on_sales_invoice",
-	},
-	"Item Price": {
-		"after_insert": "medusync.handlers.risitex.pricing.on_item_price",
-		"on_update": "medusync.handlers.risitex.pricing.on_item_price",
-		"on_trash": "medusync.handlers.risitex.pricing.on_item_price",
-	},
-	"Item": {
-		"on_update": "medusync.handlers.risitex.pricing.on_item",
-	},
-	"Customer": {
-		"after_insert": "medusync.handlers.risitex.pricing.on_customer_group_link",
-		"on_update": "medusync.handlers.risitex.pricing.on_customer_group_link",
-	},
+	# A mapping is one configuration living in two systems: saving it here
+	# refreshes the hot-path cache and tells the connected sites.
 	"Medusync Mapping": {
-		"on_update": "medusync.config.clear_mapping_cache",
-		"on_trash": "medusync.config.clear_mapping_cache",
+		"on_update": "medusync.mapping_sync.on_mapping_update",
+		"on_trash": "medusync.mapping_sync.on_mapping_trash",
+	},
+	# A site carries the warehouse and price-list maps, so saving one
+	# invalidates three hot-path caches, not one.
+	"Medusync Site": {
+		"on_update": [
+			"medusync.sites.clear_cache",
+			"medusync.warehouses.clear_cache",
+			"medusync.price_lists.clear_cache",
+		],
+		"on_trash": [
+			"medusync.sites.clear_cache",
+			"medusync.warehouses.clear_cache",
+			"medusync.price_lists.clear_cache",
+		],
 	},
 }
 
 scheduler_events = {
+	"cron": {
+		# Failed deliveries wait for their backoff (Medusync Log.next_attempt_at);
+		# this sweep re-enqueues the ones that are due.
+		"* * * * *": [
+			"medusync.tasks.retry_due",
+		],
+	},
 	"daily": [
 		"medusync.tasks.prune_logs",
+		# A mapping that names a field the DocType no longer has fails
+		# silently: the payload simply stops carrying it. Somebody should
+		# be told before they notice from the wrong end.
+		"medusync.drift.run",
 	],
 }
 
