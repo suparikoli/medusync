@@ -31,7 +31,6 @@ _FIELDS = (
 	"request_timeout",
 	"verify_ssl",
 	"handler_pack",
-	"products_doctype",
 )
 
 
