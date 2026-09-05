@@ -76,8 +76,9 @@ previous build so a newly imported module is simply missing at boot.
    message and cannot change once records are correlated. Generate two long
    random strings for its Inbound and Outbound secrets.
 2. **Medusa:** ERPNext page → settings. Cross them over — our Inbound Secret
-   is the store's `frappe_to_medusa_secret`; our Outbound Secret is its
-   `webhook_secret`.
+   is the store's `webhook_secret` (it signs what Medusa sends *to* us); our
+   Outbound Secret is its `frappe_to_medusa_secret` (it verifies what we send
+   *to* Medusa).
 3. Set `erpnext_url` on the Medusa side and `medusa_url` on the Site.
 4. Test **both** directions: `POST /admin/erpnext/ping` and, on the Frappe
    desk, **Medusync Settings → Test connection to Medusa**. They use
