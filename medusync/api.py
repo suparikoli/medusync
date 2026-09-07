@@ -758,6 +758,13 @@ def _translate(mapping, data: dict) -> dict:
 	for row in mapping.field_map:
 		if row.direction in _NOT_INBOUND:
 			continue
+		# A fixed value has no source in the payload: it is written because
+		# ERPNext requires it, not because Medusa said anything. It also
+		# wins over an incoming value of the same name — the store has no
+		# say in a field it does not model.
+		if row.get("constant_value"):
+			out[row.frappe_field] = row.constant_value
+			continue
 		source = row.medusa_path or row.frappe_field
 		if source in data:
 			out[row.frappe_field] = data[source]

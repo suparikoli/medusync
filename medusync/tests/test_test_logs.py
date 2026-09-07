@@ -40,12 +40,16 @@ class TestLogCase(IntegrationTestCase):
 		super().tearDown()
 
 	def _log(self, **over):
+		# No `site`. It is an optional Link, and naming one meant the row
+		# only inserted on a bench where that site already existed — these
+		# tests are about how a rehearsal row is marked and swept, which no
+		# site takes part in. Creating one instead would leave a second
+		# store behind for whatever ran next to fan out to.
 		spec = {
 			"direction": "Outbound",
 			"status": "Queued",
 			"event": "customer.updated",
 			"event_id": "unit-%s" % frappe.generate_hash(length=8),
-			"site": "default",
 		}
 		spec.update(over)
 		doc = frappe.new_doc("Medusync Log")

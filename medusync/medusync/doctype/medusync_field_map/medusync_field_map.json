@@ -7,6 +7,7 @@
  "field_order": [
   "frappe_field",
   "medusa_path",
+  "constant_value",
   "direction"
  ],
  "fields": [
@@ -26,6 +27,13 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Medusa Path"
+  },
+  {
+   "fieldname": "constant_value",
+   "fieldtype": "Data",
+   "label": "Fixed Value",
+   "depends_on": "eval:!doc.medusa_path",
+   "description": "Write this exact value to the Frappe field on every sync from Medusa. Use it for a mandatory field the store has no counterpart for — Item Group, Stock UOM, Customer Type. Leave Medusa Path empty when using this."
   },
   {
    "columns": 3,

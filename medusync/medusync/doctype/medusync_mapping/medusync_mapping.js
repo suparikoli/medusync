@@ -13,6 +13,13 @@ frappe.ui.form.on("Medusync Mapping", {
 	refresh(frm) {
 		if (frm.is_new()) return;
 
+		// Primary, and not under a menu: building the mapping is the thing
+		// people come to this form to do, and the grid below is where they
+		// otherwise have to type two fieldnames from memory.
+		frm.add_custom_button(__("Map Fields"), () => medusync.openFieldMapper(frm)).addClass(
+			"btn-primary",
+		);
+
 		frm.add_custom_button(__("Rehearse"), () => rehearse(frm), __("Test"));
 		frm.add_custom_button(__("Rehearse and Enable"), () => testAndEnable(frm), __("Test"));
 		frm.add_custom_button(__("Send a Test Event"), () => sendTest(frm), __("Test"));

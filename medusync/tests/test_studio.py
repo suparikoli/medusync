@@ -170,6 +170,55 @@ class TestTheOutboundDryRun(StudioCase):
 
 
 class TestTheInboundDryRun(StudioCase):
+	"""These read a real record to dry-run against.
+
+	They used to take whatever `frappe.get_all` happened to return, which
+	is nothing on a site that has not been used yet — and ERPNext ships no
+	Item Group or UOM either, so an Item cannot simply be inserted. Each
+	dependency is created here when it is missing, and only what this test
+	created is removed afterwards.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self._made = []
+
+		def ensure(doctype, name, spec):
+			if frappe.db.exists(doctype, name):
+				return name
+			frappe.get_doc({"doctype": doctype, **spec}).insert(ignore_permissions=True)
+			self._made.append((doctype, name))
+			return name
+
+		ensure(
+			"Customer",
+			"Studio Fixture Customer",
+			{"customer_name": "Studio Fixture Customer", "customer_type": "Individual"},
+		)
+		group = ensure(
+			"Item Group",
+			"Studio Fixture Group",
+			{"item_group_name": "Studio Fixture Group", "is_group": 0},
+		)
+		uom = ensure("UOM", "Studio Fixture Unit", {"uom_name": "Studio Fixture Unit"})
+		self.item = ensure(
+			"Item",
+			"STUDIO-FIXTURE-ITEM",
+			{
+				"item_code": "STUDIO-FIXTURE-ITEM",
+				"item_name": "Studio Fixture Item",
+				"item_group": group,
+				"stock_uom": uom,
+			},
+		)
+
+	def tearDown(self):
+		# Reversed: the Item refers to the Group and the UOM.
+		for doctype, name in reversed(self._made):
+			if frappe.db.exists(doctype, name):
+				frappe.delete_doc(doctype, name, force=1, ignore_permissions=True)
+		super().tearDown()
+
 	def _sample(self, **over):
 		data = {"name": "Studio Sample Customer", "customer_name": "Studio Sample Customer"}
 		data.update(over)
@@ -249,7 +298,7 @@ class TestTheInboundDryRun(StudioCase):
 	def test_the_catalogue_guard_answers_here_too(self):
 		# What the studio reports and what the receiver does must be the
 		# same decision, or the studio is worse than nothing.
-		item = frappe.get_all("Item", fields=["name"], limit=1)[0].name
+		item = self.item
 		mapping = self._mapping(
 			document_type="Item",
 			key_field="item_code",

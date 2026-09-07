@@ -1,0 +1,22 @@
+{
+ "content": null,
+ "creation": "2026-09-07 01:40:00.000000",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-09-07 01:40:00.000000",
+ "modified_by": "Administrator",
+ "module": "Medusync",
+ "name": "medusync-mappings",
+ "owner": "Administrator",
+ "page_name": "medusync-mappings",
+ "roles": [
+  {
+   "role": "System Manager"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "title": "Mappings"
+}
