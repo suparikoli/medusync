@@ -34,7 +34,7 @@ class TestFieldDirection(IntegrationTestCase):
 				"document_type": "Customer",
 				"direction": "Two-way",
 				"key_field": "email_id",
-				"medusa_entity": "customer",
+				"medusa_entity": "probe_customer",
 			}
 		)
 		for row in (
@@ -80,10 +80,12 @@ class TestFieldDirection(IntegrationTestCase):
 			}
 		)
 		payload = outbound.build_payload(self.mapping, doc)
-		self.assertEqual(payload["email"], "fd@example.com")
-		self.assertEqual(payload["name_out"], "Field Direction")
-		self.assertNotIn("thumbnail", payload)
-		self.assertNotIn("group_in", payload)
+		# An outbound event is keyed by our own fieldnames; the Medusa path
+		# is for the receiver to apply. See test_wire_convention.
+		self.assertEqual(payload["email_id"], "fd@example.com")
+		self.assertEqual(payload["customer_name"], "Field Direction")
+		self.assertNotIn("image", payload)
+		self.assertNotIn("customer_group", payload)
 
 	def test_inbound_translate_skips_dont_sync_and_outbound_only_fields(self):
 		data = {

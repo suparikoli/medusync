@@ -19,6 +19,14 @@ shape. What changed from v1:
 
 v1 keys are still emitted (`id` alongside `event_id`) so a receiver that
 has not been upgraded keeps working during a rolling deploy.
+
+Key convention
+--------------
+A message is translated once, and `kind` says by whom. An "event" body
+(`data`) is keyed by the SENDER's own fieldnames and the receiver applies
+the field map. A "mapped" body (`payload`) is keyed by the RECEIVER's
+fieldnames and is applied as it is. A sender that renames an event's keys
+makes the receiver's lookup miss, and the field is dropped in silence.
 """
 
 import time

@@ -149,8 +149,9 @@ def _payload():
 	todo.insert(ignore_permissions=True)
 
 	payload = outbound.build_payload(mapping, todo)
-	ok("mapped field is renamed to its medusa path", payload.get("title") == "selftest payload", payload)
-	ok("To Medusa field is included", payload.get("state") == "Open", payload)
+	ok("a mapped field keeps its Frappe fieldname on the wire", payload.get("description") == "selftest payload", payload)
+	ok("the Medusa path never appears in an outbound event", "title" not in payload and "state" not in payload, payload)
+	ok("To Medusa field is included", payload.get("status") == "Open", payload)
 	ok("From Medusa field is excluded from the outbound payload", "priority" not in payload, payload)
 	ok("the key field is always present", payload.get("name") == todo.name, payload)
 

@@ -337,7 +337,14 @@ _NOT_OUTBOUND = ("From Medusa", "Don't Sync")
 
 
 def build_payload(mapping, doc) -> dict:
-	"""The `data` object Medusa receives.
+	"""The `data` object Medusa receives, keyed by OUR fieldnames.
+
+	An event describes the system it came from, so the keys are Frappe
+	fieldnames and Medusa applies the field map on receipt — the same way
+	it applies it to the raw rows its pull cron reads. Renaming here as
+	well made the receiver's lookup miss, and every pair whose two names
+	differed was dropped without an error (see
+	pending_work/2026-09-06-payload-key-convention-mismatch.md).
 
 	Child tables are included as lists of plain dicts when `Send All
 	Fields` is on; an explicit field map can also name a Table field and
@@ -352,8 +359,12 @@ def build_payload(mapping, doc) -> dict:
 		for row in mapping.field_map:
 			if row.direction in _NOT_OUTBOUND:
 				continue
-			target = row.medusa_path or row.frappe_field
-			data[target] = source.get(row.frappe_field)
+			# A fixed value is our answer to ERPNext's requirement, not a
+			# fact about the store. Sending it out would invent a field on
+			# the Medusa record that nobody asked for.
+			if row.get("constant_value"):
+				continue
+			data[row.frappe_field] = source.get(row.frappe_field)
 
 	# The key is always present regardless of the field map — Medusa
 	# cannot correlate the record without it.
