@@ -18,11 +18,11 @@ anything in `pending_work/`. If the question a topic cites has no answer
 yet, stop and ask for one — send the link to this file — rather than
 implementing against an assumption.
 
-**Keeping it clean.** When a question has been answered *and* the work it
-was blocking is done, delete the question and its answer. The decision
-survives in the commit that implemented it and in the code; leaving it
-here turns this into a changelog nobody reads. A question with an answer
-and no work yet stays.
+**Keeping it clean.** This file holds only questions still waiting on an
+answer. The moment one is answered it moves to the `pending_work` topic
+doc it governs, under a `## Decided` heading — so the decision sits with
+the work rather than in a growing list nobody reads, and what is left here
+is exactly what is still owed. New questions are welcome and belong here.
 
 Where I have a view it is marked ★ — that is what I would build if told to
 use my own judgement, not a default that happens without you.
@@ -34,116 +34,9 @@ identical. Answering in either answers both.
 
 ## A. Questions that block a specific piece of work
 
-### Wallet and credit line — `2026-09-04-wallet-sync.md`, `2026-09-07-credit-line.md`
-
-You are building the wallet and credit-line applications yourself, on both
-ERPNext and Medusa, and these will be linked to them afterwards. So the
-questions are no longer about what to build — they are about the seam.
-
-**Q1. What will the ERPNext side be: a DocType in your new app, or several?**
-The connector needs a name to map, and one transaction-shaped DocType is
-far easier to sync than a balance plus a ledger.
-(a) One transaction DocType; balance is derived
-(b) A balance DocType and a transaction DocType
-(c) ★ Tell me when it exists and I will read it rather than guess now
-
-> **Answer:** We will create a new application on both Frappe and Medusa which will deal with wallet and line of credit. I'll give you access to those later once it's done
-
-**Q2. Which side owns the balance once both exist?**
-(a) ERPNext computes it, Medusa caches a read-only copy
-(b) ★ ERPNext computes it and Medusa never stores one, only transactions
-(c) Both, reconciled — this needs a tie-break rule and it has to be yours
-
-> **Answer:** Both with time stamp and if that doesn't resolve the conflict ERPNext's data takes precidence
-
-**Q3. `Customer.wallet_balance_paise` still exists on the ERPNext side with
-nothing writing to it, left over from the custom app that was uninstalled.
-Keep it as the landing place, or drop it now that you are building a proper
-app?**
-(a) Keep
-(b) ★ Drop it — a field the new app does not own is a trap
-
-> **Answer:** If anything exists, it will be related to the old work remove it from both medusa and ERPNext
-
-**Q3b. Should the connector treat wallet and credit line as one entity or
-two?**
-Medusa already has `credit_line`, `credit_terms` and `order_credit_line`
-tables alongside `wallet`, which suggests two.
-(a) ★ Two — a wallet is money held, a credit line is money owed, and they
-reconcile differently
-(b) One ledger with a sign
-
-> **Answer:** 2 in both the Cases. In ERPNext let's have a setting called Wallet-LOC-balancer. Remember this for now. I'll just need feature list for both Frappe and medusa applications for Wallet-LOC. Later
-
-### Percentage Pricing Rules and MRP — `2026-09-04-pricing-rules-and-mrp.md`
-
-**Q4. Where should an ERPNext Pricing Rule expressed as a percentage or a
-discount land in Medusa?**
-Flat-rate tier prices already sync. Percentages have no direct counterpart.
-(a) A Medusa price-list rule, computed to a flat amount at sync time
-(b) A Medusa promotion
-(c) ★ Variant metadata only, with the storefront applying it — the least
-wrong until somebody needs it enforced at checkout
-(d) Not at all
-
-> **Answer:** Let's use ERPNext default price list. Also, when we modify the product doctype in erpenext. Let's put all the custom fields related to Medusync in a separate tab where we'll have everything. We'll dive deeper into this later
-
-**Q5. Where should MRP land?**
-(a) Variant metadata, for display only
-(b) ★ A second Medusa price list named `MRP`, so the storefront can strike
-it through with real price machinery
-(c) Not at all
-
-> **Answer:** I don't want to use MRP I want to use 
-
-**Q6. There is no ERPNext field for MRP on the demo site and no Pricing
-Rules seeded. Will you seed a site, or should I add an `Item.mrp` custom
-field in a patch and seed a couple myself?**
-(a) You will seed one
-(b) ★ I add the field and seed a couple of rules to test against
-
-> **Answer:**
-
-### Variant options, barcode, brand — `2026-09-04-variant-attributes.md`
-
-**Q7. Do ERPNext Item variant templates become Medusa product options, or
-does each ERPNext variant become its own Medusa product?**
-(a) ★ Options — one Medusa product with a variant per combination, which is
-what a storefront expects
-(b) Separate products — simpler, and loses the size picker
-
-> **Answer:**
-
-**Q8. Which Item Attributes are the option axes?**
-Colour and size are the usual two, but ERPNext allows any.
-(a) ★ Read from each Item's own attribute table — no configuration, works
-for any client
-(b) A configured list in Settings
-
-> **Answer:**
-
-**Q9. Barcode, UOM and brand — where does each land?**
-`Item Barcode` is a child table, so there can be several.
-(a) ★ Barcode: the row whose type is `EAN`, else the first, into
-`variant.barcode`. UOM: the stock UOM into variant metadata, conversions
-not synced. Brand: `Item.brand` into variant metadata.
-(b) Something else — say which for each
-
-> **Answer:**
-
 ### Prices coming back from Medusa — `2026-09-04-inbound-price-path.md`
 
-**Q10. When Medusa sends a price back, which ERPNext Price List does it
-belong to?**
-The direction is already stored per list per store; the target is missing.
-(a) ★ The list mapped as Base Price for that store, refusing if that list
-is not marked `Two-way`
-(b) A dedicated list per store, created on first use
-(c) Carried on the payload, and ERPNext trusts it
-
-> **Answer:**
-
-**Q11. A Medusa customer-tier price has no quantity bracket, and ERPNext
+**Q1. A Medusa customer-tier price has no quantity bracket, and ERPNext
 tiers are defined by one (`packing_unit`). What happens on the way back?**
 (a) ★ Refuse tier prices inbound; base prices only. Tiers stay ERPNext's
 (b) Accept at bracket 1, overwriting the single-unit price
@@ -151,7 +44,7 @@ tiers are defined by one (`packing_unit`). What happens on the way back?**
 
 > **Answer:**
 
-**Q12. Rounding.** ERPNext sends 799.00, Medusa stores 79900 minor units
+**Q2. Rounding.** ERPNext sends 799.00, Medusa stores 79900 minor units
 and sends back 799.0. The echo guard compares payloads.
 (a) ★ Compare to two decimal places, treating equal-within-tolerance as an
 echo
@@ -159,7 +52,7 @@ echo
 
 > **Answer:**
 
-**Q13. May an inbound price create an Item Price that does not exist, or
+**Q3. May an inbound price create an Item Price that does not exist, or
 only update one that does?**
 (a) ★ Update only — a price appearing in ERPNext from a storefront is a
 surprise nobody asked for
@@ -169,14 +62,14 @@ surprise nobody asked for
 
 ### Product images — `2026-09-04-product-images.md`
 
-**Q14. Who moves the bytes?**
+**Q4. Who moves the bytes?**
 (a) ★ Medusa pulls a URL ERPNext gives it — fewer moving parts, and Medusa
 already owns file storage
 (b) ERPNext pushes to a Medusa upload endpoint
 
 > **Answer:**
 
-**Q15. ERPNext private files are not fetchable without a session. What
+**Q5. ERPNext private files are not fetchable without a session. What
 should happen to them?**
 (a) ★ Skip them and say so in the log — somebody who wants an image on the
 storefront can make it public
@@ -185,14 +78,14 @@ storefront can make it public
 
 > **Answer:**
 
-**Q16. What counts as a change worth re-sending?**
+**Q6. What counts as a change worth re-sending?**
 (a) ★ A content hash computed on the ERPNext side, carried in the payload
 (b) File size and modified timestamp
 (c) Always re-send — simple and expensive
 
 > **Answer:**
 
-**Q17. Which image is the primary, and do the others sync at all?**
+**Q7. Which image is the primary, and do the others sync at all?**
 (a) ★ `Item.image` is the primary; other attachments do not sync until
 somebody asks
 (b) `Item.image` first, then every image attachment in order
@@ -201,7 +94,7 @@ somebody asks
 
 ### An order's payment status — `2026-09-05-order-payment-status.md`
 
-**Q18. Which document is the payment authority when a Sales Order and a
+**Q8. Which document is the payment authority when a Sales Order and a
 Sales Invoice disagree?**
 This is the only one on the list that is live and mildly wrong today rather
 than absent: an order paid the ordinary way through an invoice reads
@@ -216,42 +109,7 @@ computed as `erp_payments_total`, ignores credit terms entirely
 
 ### The mapping editor — `2026-09-07-mapping-studio-parity.md`, `2026-09-07-medusa-field-discovery.md`
 
-**Q27. How close to n8n do you want the mapper?**
-Neither side is a two-panel drag-and-drop today: Medusa has a real editor
-with a field-pair grid, ERPNext has a DocType form with studio buttons.
-(a) ★ Show each row's currently-resolved value first — small, and removes
-most of the typing-blind problem — then decide whether the two-panel
-layout is still worth it
-(b) Build the two-panel drag mapper properly, both sides
-(c) Leave it; the grid plus Sample is enough
-
-> **Answer:**
-
-**Q28. ERPNext's mapper is a DocType form and cannot host a two-panel
-layout. Replace it with a Frappe Page?**
-It means giving up the free things a DocType form provides: permissions,
-version history, list views, filters.
-(a) ★ Only if Q27 lands on (b) — otherwise the form plus buttons is the
-better trade
-(b) Yes regardless; the editor deserves a purpose-built page
-(c) No
-
-> **Answer:**
-
-**Q29. Where should Medusa's field list come from?**
-It is a hand-curated `paths` array per entity today, so a field nobody
-listed is invisible in the picker, and a Medusa upgrade that adds a column
-adds nothing here. ERPNext's equivalent is read live from `get_meta`.
-(a) Keep curating, and add a test that reports fields present in real data
-but missing from the list
-(b) ★ Derive from the model definition at runtime, falling back to walking
-a real record when a model has no rows, keeping the curated list only for
-labels and suggested transforms
-(c) Derive from a real record only
-
-> **Answer:**
-
-**Q30. Nobody can currently answer "who changed this mapping field, and to
+**Q9. Nobody can currently answer "who changed this mapping field, and to
 what" on the Medusa side.** ERPNext has Frappe's document version history;
 Medusa keeps only `version` and `updated_by_user_id`. Worth an edit log?
 (a) ★ Yes — a small revisions table on `erpnext_mapping`, written on save
@@ -259,57 +117,59 @@ Medusa keeps only `version` and `updated_by_user_id`. Worth an edit log?
 
 > **Answer:**
 
-### The field dictionary — `2026-09-07-field-equivalence-dictionary.md`
+### How the two systems pair — `2026-09-06-guided-presets-target-readonly-fields.md`
 
-Most of this exists as code: `canonical-mappings.ts` for whole (entity ×
-DocType) pairs, and `autofill.ts` with 28 synonym groups and a
-seven-rung confidence ladder. What is missing is that it cannot be edited,
-does not learn, and does not reach ERPNext at all.
-
-**Q31. Where should the dictionary live?**
-(a) ★ A DocType on ERPNext and a model on Medusa, synced by the mechanism
-mappings already use — uid, version, higher wins, ERPNext takes a tie
-(b) ERPNext owns it; Medusa reads it over the wire
-(c) Stay as code, and just widen the constants
-
-> **Answer:**
-
-**Q32. What scope should an entry have?**
-(a) Global only — `email` ↔ `email_id` everywhere
-(b) ★ Global, plus optional narrowing to an (entity, DocType) pair, plus
-optional narrowing to one site. Most rows are global; the ones that matter
-to a client are not
-(c) Per (entity, DocType) only
-
-> **Answer:**
-
-**Q33. When an operator corrects a suggested pairing, should the dictionary
-learn it?**
-That correction is the most reliable row anyone could write, and writing it
-back automatically is also how a dictionary fills with one client's habits.
-(a) ★ Record it as `suggested` from `operator`, and let somebody promote it
-to `confirmed` — learning that has to be agreed to
-(b) Write it straight in as confirmed
-(c) Never; the dictionary is edited by hand only
+**Q10. "This should work for multiple Medusa & ERPNext sites" — one half of
+that is not built. Which way should it go?**
+ERPNext already talks to many stores: one `Medusync Site` row per connected
+Medusa, and inbound requests are attributed by signature. Medusa does not
+have the mirror of that. `src/modules/erpnext/models/setting.ts` is a
+deliberate singleton — one row pinned by `singleton_key = "default"` behind a
+unique index, one `erpnext_url`, one `site_id` — so a single Medusa store can
+be paired with exactly one ERPNext. Every discovery cache, dictionary entry
+and mapping the next three pieces of work introduce has to be keyed by
+*something*, and that key is only meaningful if this is settled first.
+(a) ★ Many Medusa stores per ERPNext is the supported topology, and one
+Medusa answers to one ERPNext. The new work keys by connection anyway, so
+nothing has to be rebuilt if (b) happens later
+(b) Medusa should also hold many ERPNext connections — replace the singleton
+with a real table, add a connection picker to every admin screen, and route
+inbound by which secret verified. A sizeable change with its own migration,
+and it touches the forwarder, the breaker and the settings UI
+(c) Something else — say what pairs with what
 
 > **Answer:**
 
-**Q34. Should selecting an entity and a DocType auto-fill the grid, or
-offer the rows?**
-Auto-filling is what was asked for and is faster. Offering makes the
-operator look at a `weak` guess before it becomes a mapping.
-(a) ★ Auto-fill everything at `synonym` or better; list the `weak` and
-`none` rows separately for the operator to accept
-(b) Auto-fill everything the matcher produces
-(c) Offer everything, accept nothing automatically
+**Q11. A Medusa customer is three ERPNext records. Which one does the
+guided sync own?**
+ERPNext keeps a customer's email and phone on a linked **Contact**, not on
+the Customer: `email_id`, `mobile_no`, `first_name` and `last_name` are
+fieldtype Read Only with `fetch_from = customer_primary_contact.*`, and
+Frappe refills them from the link. The old preset wrote them anyway and
+keyed the whole mapping on `email_id` — it appeared to work only because
+`customer_primary_contact` was empty. The preset now syncs the name, a
+fixed Customer Type and the link id, and says so. That is honest but
+partial, and a flat mapping addresses one DocType, so the rest needs a
+decision. Address is the same shape again.
+(a) ★ A `customer` handler pack that writes Contact and Address alongside
+the Customer. It is what handler packs are for, it gets the ordering right,
+and it is not configurable from the mapper
+(b) A second mapping, `customer` → `Contact`, keyed on the Medusa id.
+Configurable, but the mapper cannot express "only after the Customer
+exists", so first sync of a new customer would race
+(c) Leave it — name and link id are enough, and whoever needs contact
+details adds their own mapping
+See `2026-09-06-guided-presets-target-readonly-fields.md`.
 
 > **Answer:**
 
 ---
 
+---
+
 ## B. Decisions about what is already built
 
-**Q19. Turn off the legacy Single secret on this installation now?**
+**Q13. Turn off the legacy Single secret on this installation now?**
 It works, and it is the one place where "which store is this?" is answered
 by something other than the signature. Every connected store here has
 delivered with its own secret.
@@ -318,7 +178,7 @@ delivered with its own secret.
 
 > **Answer:**
 
-**Q20. A Medusa hard reset switches off *every* mapping, including ones
+**Q14. A Medusa hard reset switches off *every* mapping, including ones
 ERPNext never touched. Scope it to the connection being reset?**
 Harmless with one connection, wrong the moment a second store connects.
 (a) ★ Scope it by `site_id` before a second connection exists
@@ -326,19 +186,38 @@ Harmless with one connection, wrong the moment a second store connects.
 
 > **Answer:**
 
-**Q21. Both sides now refuse to be switched on remotely, so they can
-disagree about `enabled` at the same version with nothing reconciling it.
-Do you want a reconcile action?**
-(a) ★ Yes — a "differences with the other side" view and a per-mapping
-"take theirs / keep mine"
-(b) No — the Needs Attention flag is enough
-
-> **Answer:**
-
-**Q22. The shipped default set is three mappings: Customers, Catalogue,
+**Q16. The shipped default set is three mappings: Customers, Catalogue,
 Orders. Enough to start a client on?**
 (a) ★ Yes — everything past those three is genuinely per-project
 (b) Add more — say which
+
+> **Answer:**
+
+**Q21. A `mapped` push with no handler pack behind it is refused with a
+500. Should it fall through to the generic apply?**
+Raised while settling Q12. A `mapped` body is already in ERPNext
+fieldnames, so the generic `apply_inbound` could take it with no
+translation step; today `_apply_mapped` answers "no configured handler
+pack provides a mapped upsert" instead. Only matters for a site that
+runs no pack at all.
+(a) ★ Yes — the generic mapper is what a site without a pack has
+(b) No — a site with no pack has opted out of Medusa-originated writes
+
+> **Answer:**
+
+**Q22. "Link this product to an existing Item" half-succeeds when Medusa
+catalogue updates are off.** Seen 2026-09-07 while verifying Q12 live:
+the link route stores the item code on the Medusa product and reports
+`ok: true`, then sends `product.linked` as a `mapped` push to stamp
+`medusa_product_id` on the Item — and ERPNext's catalogue guard refuses
+it as `catalogue-protected`, because `allow_medusa_catalogue_updates` is
+off. The two sides then disagree about whether they are linked, and
+reconciliation keeps reporting the pair.
+(a) ★ A link stamp is not a catalogue edit — let `product.linked` through
+the guard (it writes only the link id field)
+(b) Refuse the whole link on the Medusa side when ERPNext will not take
+the stamp, so `ok: false` says why
+(c) Leave it — an operator who links must also allow updates
 
 > **Answer:**
 
@@ -346,29 +225,18 @@ Orders. Enough to start a client on?**
 
 ## C. Getting it in front of a client
 
-**Q23. The branch is `feat/phase0-1-foundation` on both repos and now holds
-six phases plus follow-ups. Rename before opening pull requests?**
-A rename means force-pushing the new name and deleting the old one on both
-remotes; the history is unchanged.
-(a) ★ Rename to `feat/configurable-bidirectional-sync`, then one PR per
-repo against `master` / `main`
-(b) Open the PRs under the current name
-(c) Neither yet
-
-> **Answer:**
-
-**Q24. Which deployment goes first — an existing one, or a fresh site?**
+**Q18. Which deployment goes first — an existing one, or a fresh site?**
 ★ A fresh site: everything built since Phase 6 is written for a second
 deployment and none of it has met one.
 
 > **Answer:**
 
-**Q25. Is there a deadline or a client date to build towards?**
+**Q19. Is there a deadline or a client date to build towards?**
 Nothing in the brief mentioned one, and it changes what is worth doing next.
 
 > **Answer:**
 
-**Q26. Development may continue on another machine. Is that machine going
+**Q20. Development may continue on another machine. Is that machine going
 to have a Frappe bench and a Medusa sandbox, or only the two repos?**
 `docs/RESUMING-ON-ANOTHER-MACHINE.md` covers both cases, but the answer
 decides what is worth preparing.

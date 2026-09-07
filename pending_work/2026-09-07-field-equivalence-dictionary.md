@@ -69,7 +69,7 @@ Three things follow from that shape:
    suggestions for the first time.
 3. **It learns, if you want it to.** An operator who corrects a pairing has
    just produced the most reliable row in the table. Whether that gets
-   written back automatically is Q33 — it is the difference between a
+   written back automatically is decided below — it is the difference between a
    dictionary and a habit.
 
 ## Where it plugs in
@@ -94,6 +94,76 @@ It also depends on `2026-09-07-medusa-field-discovery.md`: a dictionary
 whose Medusa half is a curated list can only pair the fields somebody
 already listed.
 
+## Mapping to something that is not the suggestion
+
+Asked directly, 2026-09-06: what does the dictionary do when the pairing you
+want is not the one it offers?
+
+Nothing — and that is the point. The dictionary only proposes. What syncs is
+the saved mapping row, and the engine walks arbitrary dotted paths, so a
+custom field, a nested path or a DocType field nobody listed is mappable by
+typing it. A client whose Item calls the HSN code `custom_hsn` gets a `weak`
+guess, overwrites it, and it works.
+
+What the dictionary adds is that the override stops being retyped: recorded
+as `suggested` from `operator`, scoped to that site (both decided below), and offered
+first there next time because a narrower scope outranks a broader one —
+site, then (entity, DocType), then global, then shipped. Promotion to
+`confirmed` is what lets it travel to another client.
+
+### A per-row lock is needed, and does not exist
+
+Autofill is whole-grid today. `runAutofill` in `src/admin/routes/erpnext/
+page.tsx` refuses to run when the grid already has rows, but `force`
+replaces `field_mappings` outright. So a hand-made override survives only
+until somebody re-runs autofill, and the operator who set it has no way to
+say "this row is mine".
+
+The two-panel mapper needs this per row: a pair an operator set is pinned,
+autofill fills around it and never over it, and the pin is what gets
+recorded to the dictionary. Without that, the dictionary learns from
+corrections that the next autofill throws away. Not covered by the auto-fill decision below, which
+is about which rows get filled, not which rows are protected.
+
 ## Questions
 
-See `00-QUESTIONS-ANSWER-THESE-FIRST.md` — **Q31**–**Q34**.
+Nothing here is waiting on an answer — see **Decided** below.
+It is waiting to be built.
+
+---
+
+## Decided
+
+Moved here from `00-QUESTIONS-ANSWER-THESE-FIRST.md`, which now
+carries only questions still waiting on an answer. The decision and
+the reasoning stay with the work they govern.
+
+### Where the dictionary lives
+
+> **Answer:** a — a DocType on ERPNext and a model on Medusa, synced by the
+> mechanism mappings already use (uid, version, higher wins, ERPNext takes
+> a tie). It must fan out per connected site the way mappings already do,
+> not as a single global push.
+
+### What scope an entry has
+
+> **Answer:** b — global, plus optional narrowing to an (entity, DocType)
+> pair, plus optional narrowing to one site. "Site" means one end of one
+> connection: a Medusync Site from ERPNext's side, an ERPNext connection
+> from Medusa's. A row narrowed to one site never leaks to another.
+
+### Whether a correction is learned
+
+> **Answer:** a — record the correction as `suggested` from `operator`, and
+> let somebody promote it to `confirmed`. A correction made on one site is
+> recorded against that site until promoted, so one client's naming habits
+> do not become another's defaults.
+
+### Auto-fill, or offer the rows
+
+> **Answer:** a, as built. `Suggest matches` applies anything the matcher
+> is confident about, never overwrites a pair somebody chose, and never
+> auto-applies a `none` row — a mandatory field with no guess is surfaced
+> for a person rather than filled with one. Loose guesses are counted in
+> the note so they get looked at.
+

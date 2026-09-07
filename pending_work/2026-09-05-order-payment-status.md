@@ -63,7 +63,7 @@ code and here, rather than being quietly wrong.
 
 See `00-QUESTIONS-ANSWER-THESE-FIRST.md`.
 
-- **Q18** — which document is the payment authority when a Sales Order and
+- **Q8** — which document is the payment authority when a Sales Order and
   a Sales Invoice disagree.
 
 One question, and it is the only one on this list that is live and mildly

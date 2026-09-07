@@ -78,4 +78,96 @@ are editorial and worth keeping.
 
 ## Questions
 
-See `00-QUESTIONS-ANSWER-THESE-FIRST.md` — **Q29**.
+Answered and built — see **Built** below.
+
+---
+
+## Built — 2026-09-06
+
+It was answered (b), and the Medusa half is done and verified against a
+running 2.19 store.
+
+- `src/modules/erpnext/discovery.ts` — pure. `describeModel` walks a
+  module's mikro-orm metadata; `describeRecord` is the fallback walk;
+  `mergeFieldSources` puts the curated labels and transforms on top.
+  19 unit tests.
+- `src/modules/erpnext/discovery-runtime.ts` — the impure half.
+  `svc.baseRepository_.manager_.getMetadata().getAll()` is the access path,
+  which works identically for core modules and a client's own. It fails
+  soft: if a future Medusa moves those internals, discovery turns off and
+  the curated list still works, with `fields_source: "curated"` and a
+  `discovery_error` saying so.
+- `GET /admin/erpnext/medusa-entities/:entity/fields` — the mirror of the
+  Frappe side's `GET /admin/erpnext/doctypes/:name`.
+
+Result across all 17 registry entities: **126 curated paths → 417 offered**,
+every one deriving from `model`, none from the fallback.
+
+### Two things the live check caught that the unit tests could not
+
+Both were wrong assumptions in a fixture I had written from memory, and both
+looked completely fine until the endpoint was called against a real store.
+The fixture is now a verbatim dump, and each has a regression test.
+
+1. **mikro-orm 6 renamed `reference` to `kind`.** Reading `reference`
+   returned `undefined` for every relation, so each one fell through to the
+   scalar branch — and since a relation's `type` holds its *target class
+   name*, `addresses` and `groups` were offered as `string` fields.
+2. **Medusa's DML emits both halves of a to-one relation as `m:1`.**
+   `collection` (the object) and `collection_id` (the key) are both
+   relations to `ProductCollection`; only `mapToPk: true` tells them apart.
+   Descending the key half produced 18 paths like `collection_id.handle`,
+   which resolve against a string and can never return a value. Product
+   went from 63 fields to 48 once the key half was emitted as an `id`.
+
+### Known limit, for the mapper step
+
+Model discovery sees stored columns, not computed ones. `order.total` and
+`order.subtotal` are BigNumber getters on the enriched object with no column
+behind them, so they appear only because `registry.ts` curates them — which
+is the reason the curated list is kept rather than replaced. A client's own
+computed field would be invisible the same way. `describeRecord` would find
+it; whether to union the two sources rather than treat record-walking purely
+as a fallback is worth deciding when the two-panel mapper is built and it is
+clear how much noise the picker can carry.
+
+## What discovery cannot see: anything across a module link
+
+Asked directly, 2026-09-06: "why am I not seeing price?"
+
+Because price is not on the Product model. Medusa v2 keeps prices in the
+**Pricing** module (`PriceSet` / `Price`), attached to `ProductVariant`
+through a *module link* — not a mikro-orm relation. Discovery reads one
+module's ORM metadata, and a module link is not in it, so the walk stops at
+the module boundary. Confirmed against the running store: the product field
+list has 48 entries and **no** price, inventory or sales-channel path.
+
+The same boundary hides:
+
+| Wanted | Lives in | Reached by |
+|---|---|---|
+| price, currency | Pricing module | `query.graph` through a link |
+| stock, reserved | Inventory module | same |
+| sales channels | Sales Channel module | same |
+
+So the honest answer to "will new fields show up automatically?" is
+**yes within a module, no across one**:
+
+- A column added to a model in any *registered* module — including a
+  client's own — appears with no maintenance. That is the whole point of
+  deriving from the model, and it works for custom modules identically.
+- Anything behind a module link appears only if the entity's `fetchById`
+  adapter loads it and a curated path names it. `variants.0.sku` is in the
+  list for exactly that reason, and it is curated, not derived.
+
+### What it would take
+
+Medusa's `query.graph` can traverse links, and the joiner config on each
+module service names what it links to. Discovery could read those and offer
+one more level — `variants.0.prices.0.amount` and so on. Two things make it
+more than an afternoon: the path shape has to address a row inside a
+collection (the flat mapper deliberately refuses `addresses.city` for this
+reason), and every linked path costs a graph expansion on every push, so it
+cannot be offered as freely as a column. Worth doing, worth doing
+deliberately, and it belongs with the two-panel mapper rather than before it.
+

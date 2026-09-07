@@ -71,4 +71,41 @@ In the order that gets the most from the least:
 
 ## Questions
 
-See `00-QUESTIONS-ANSWER-THESE-FIRST.md` — **Q27**, **Q28**.
+Both were answered and built — see **Built** below. What is still open
+here is the edit-log question, **Q9**.
+
+---
+
+## Built — 2026-09-07
+
+Both questions here were answered and built: both sides now have a real editor,
+and ERPNext got its own page rather than a DocType form.
+
+**ERPNext**
+- `Mappings` page (`/app/medusync-mappings`) — the same columns as the
+  Medusa admin, in the same order: name, entity, doctype, direction, pairs,
+  last run, an enable switch and delete. Computed in `portal.py` so the two
+  lists agree on what a mapping is instead of each deciding for itself.
+- A field mapper dialog: both sides are dropdowns with **Required** first
+  above a separator, direction as four arrows, a coverage banner checking
+  *both* sides, `Suggest matches`, and fixed values that offer the real
+  accepted values (a Link lists this site's records, a Select its options).
+- Lives in `public/js/mapper.bundle.js` via `app_include_js`, so the page
+  and the form share one implementation.
+
+**Medusa**
+- The field-pair row was six always-visible controls; it is now store field
+  · arrows · Frappe field, with transforms, combined `{a} {b}` sources and
+  unlisted fieldnames behind a `⋯` that opens itself when a row already
+  uses one.
+- The picker was still reading the **curated** paths. It now loads the
+  discovered list per entity, falling back to curated only if the store
+  cannot be read.
+- The pull filter is rows of dropdowns rather than hand-written JSON, and
+  the raw condition expression is hidden unless the preset is Custom.
+
+**Not done:** neither side searches a long dropdown — fine for Item at 84
+fields, tedious for Sales Order at 117. And the mapper does not yet order
+suggestions by the dictionary's confidence, because the dictionary does not
+exist yet.
+

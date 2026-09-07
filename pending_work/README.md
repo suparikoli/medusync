@@ -37,14 +37,18 @@ The working order is:
 |---|---|
 | `2026-09-04-wallet-sync.md` | the wallet applications being built separately |
 | `2026-09-07-credit-line.md` | the credit-line applications being built separately |
-| `2026-09-04-pricing-rules-and-mrp.md` | Q4–Q6 |
-| `2026-09-04-variant-attributes.md` | Q7–Q9 |
-| `2026-09-04-inbound-price-path.md` | Q10–Q13 |
-| `2026-09-04-product-images.md` | Q14–Q17 |
-| `2026-09-05-order-payment-status.md` | Q18 |
-| `2026-09-07-mapping-studio-parity.md` | Q27–Q28, Q30 |
-| `2026-09-07-medusa-field-discovery.md` | Q29 |
-| `2026-09-07-field-equivalence-dictionary.md` | Q31–Q34 |
+| `2026-09-04-pricing-rules-and-mrp.md` | decided — MRP is removed entirely |
+| `2026-09-04-variant-attributes.md` | decided — options, attributes, barcode/UOM/brand |
+| `2026-09-04-inbound-price-path.md` | Q1–Q3 (target price list decided) |
+| `2026-09-04-product-images.md` | Q4–Q7 |
+| `2026-09-05-order-payment-status.md` | Q8 |
+| `2026-09-07-mapping-studio-parity.md` | Q9 — the rest is built |
+| `2026-09-07-medusa-field-discovery.md` | decided and built |
+| `2026-09-07-field-equivalence-dictionary.md` | decided — waiting to be built |
+| `2026-09-06-guided-presets-target-readonly-fields.md` | Q10–Q11 |
+| `2026-09-06-payload-key-convention-mismatch.md` | decided and built — Q21 is the follow-on |
+| `2026-09-07-one-sync-per-pair.md` | decided and built — answers Q15 |
+| `2026-09-07-state-of-play.md` | where everything stands; read it first |
 
 Wallet and credit line are a different kind of pending: they are not waiting
 on a decision so much as on two applications that do not exist yet. Their

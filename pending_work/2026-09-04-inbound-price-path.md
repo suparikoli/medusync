@@ -57,16 +57,28 @@ expensive in a way a wrong stock level is not.
 
 See `00-QUESTIONS-ANSWER-THESE-FIRST.md`.
 
-- **Q10** — which ERPNext Price List a price coming back from Medusa belongs
+- **Q4** — which ERPNext Price List a price coming back from Medusa belongs
   to. There is no obvious answer: Medusa has no concept of the list it came
   from once the price is stored.
-- **Q11** — what happens to a Medusa tier price, which has no quantity
+- **Q1** — what happens to a Medusa tier price, which has no quantity
   bracket, when ERPNext tiers are defined by one.
-- **Q12** — how much rounding tolerance the echo guard allows, since a
+- **Q2** — how much rounding tolerance the echo guard allows, since a
   price crossing to minor units and back may not compare equal.
-- **Q13** — whether an inbound price may create an Item Price or only
+- **Q3** — whether an inbound price may create an Item Price or only
   update one that exists.
 
 All four have to be answered together: they are one design. A wrong price
 landing in ERPNext is expensive in a way a wrong stock level is not, which
 is why none of it was guessed at.
+
+---
+
+## Decided
+
+Moved here from `00-QUESTIONS-ANSWER-THESE-FIRST.md`, which carries only questions
+still waiting on an answer. The decision stays with the work it governs.
+
+
+### Which Price List an inbound price belongs to
+> **Answer:** Both these softwares allow multiple price list. Based on the settings price sync happens either one way or 2. In erpnext we select the price lists that we want to push to medusa. 
+> Same goes with customer groups.
