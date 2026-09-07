@@ -166,6 +166,9 @@ def fields_of(doctype: str) -> list[dict]:
 				"fieldtype": df.fieldtype,
 				"options": df.options,
 				"reqd": int(df.reqd or 0),
+				"fetch_from": df.fetch_from or None,
+				"read_only": int(df.read_only or 0),
+				"default": df.default or None,
 				"sample": sample.get(df.fieldname),
 			}
 		)
@@ -227,6 +230,17 @@ def dry_run_outbound(mapping_name: str, docname: str | None = None) -> dict:
 	if not site_rows:
 		site_rows = []
 
+	missing_there, store_note = _store_requirements(mapping)
+	warnings = _outbound_warnings(mapping, events, condition_passes, site_rows)
+	if store_note:
+		warnings.append(store_note)
+	errors = []
+	if missing_there:
+		errors.append(
+			frappe._("The store will not create this record without {0}. Map each one from a field here.").format(
+				", ".join(missing_there)
+			)
+		)
 	return {
 		"ok": True,
 		"direction": "outbound",
@@ -238,8 +252,38 @@ def dry_run_outbound(mapping_name: str, docname: str | None = None) -> dict:
 		"condition": mapping.condition or None,
 		"condition_passes": condition_passes,
 		"sites": site_rows,
-		"warnings": _outbound_warnings(mapping, events, condition_passes, site_rows),
+		"warnings": warnings,
+		"errors": errors,
+		"missing_in_store": missing_there,
 	}
+
+
+def _store_requirements(mapping) -> tuple[list[str], str | None]:
+	"""What the store will not create this record without, and nothing
+	here fills. Asked of the store itself, so the answer is its own; a
+	store that cannot be reached is reported, not treated as satisfied.
+
+	Covered means a pair that flows to the store from a field here — a
+	fixed value only ever flows in, so it covers nothing over there.
+	"""
+	from medusync import medusa_fields
+
+	if not mapping.get("medusa_entity"):
+		return [], None
+	try:
+		body = medusa_fields.fields(mapping.medusa_entity, site_id=mapping.get("site") or None)
+	except Exception as exc:
+		return [], frappe._("Could not read what the store requires: {0}").format(str(exc)[:200])
+	required = [f for f in (body.get("fields") or []) if f.get("required")]
+	covered = {
+		row.medusa_path
+		for row in (mapping.field_map or [])
+		if row.medusa_path
+		and row.frappe_field
+		and not row.get("constant_value")
+		and row.direction in ("Two-way", "To Medusa")
+	}
+	return [f.get("label") or f.get("path") for f in required if f.get("path") not in covered], None
 
 
 def _outbound_warnings(mapping, events, condition_passes, site_rows) -> list[str]:
