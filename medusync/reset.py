@@ -37,7 +37,7 @@ import secrets
 import frappe
 from frappe.utils import add_to_date, now_datetime
 
-from medusync import config, defaults, echo, envelope, sites
+from medusync import config, defaults, echo, envelope, mapping_sync, sites
 
 REQUEST_DOCTYPE = "Medusync Reset Request"
 
@@ -349,6 +349,15 @@ def perform(name: str) -> dict:
 	finally:
 		frappe.flags[RESET_FLAG] = False
 		frappe.clear_cache()
+
+	# Both sides just rewrote their mappings without telling each other —
+	# the flag above is what keeps the two from colliding. Now that this
+	# side's set is final the store gets the whole list, so the versions
+	# line up again and its next edit is not refused as stale.
+	try:
+		report["pushed"] = mapping_sync.push_all(doc.site)
+	except Exception:
+		frappe.log_error(title="Medusync could not push the mappings after a reset", message=frappe.get_traceback())
 
 	return report
 

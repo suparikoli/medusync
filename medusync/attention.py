@@ -43,7 +43,19 @@ def flag(mapping_name: str, kind: str, detail: str, *, disable: bool = False) ->
 	updates = {"attention": kind, "attention_detail": detail[:1000]}
 	if disable:
 		updates["enabled"] = 0
+		# One version up: off here is off there too, and the store must
+		# not refuse the news as stale.
+		updates["version"] = int(frappe.db.get_value(MAPPING_DOCTYPE, mapping_name, "version") or 1) + 1
 	frappe.db.set_value(MAPPING_DOCTYPE, mapping_name, updates, update_modified=False)
+	if disable:
+		# Announced without a save, for the same reason it was written
+		# without one. A mapping runs only when both sides have it on.
+		from medusync import mapping_sync
+
+		try:
+			mapping_sync.push_mapping(frappe.get_doc(MAPPING_DOCTYPE, mapping_name))
+		except Exception:
+			frappe.log_error(title="Medusync could not announce a switched-off mapping", message=frappe.get_traceback())
 	return not already
 
 

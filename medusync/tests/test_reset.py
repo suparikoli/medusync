@@ -315,13 +315,23 @@ class TestWhatAResetDoes(ResetCase):
 			before.medusa_customer_id,
 		)
 
-	def test_it_tells_nobody_about_the_mappings_it_rewrote(self):
+	def test_it_rewrites_quietly_then_sends_the_whole_list_once(self):
 		# Both sides restore the same identifiers at the same moment. If
-		# each pushed its copy, the two would collide on version and the
-		# conflict rule would pick a winner nobody asked for.
+		# each pushed while rewriting, the two would collide on version and
+		# the conflict rule would pick a winner nobody asked for. So nothing
+		# goes out until this side's set is final — and then all of it does,
+		# so the versions line up again and the store's next edit is not
+		# refused as stale.
+		site = self.request_row.get("site")
 		with patch("medusync.mapping_sync.push_mapping") as pushed:
 			reset.perform(self.request_row["name"])
-		self.assertEqual(pushed.call_count, 0)
+		applicable = [
+			m for m in frappe.get_all("Medusync Mapping", fields=["site"]) if not m.site or m.site == site
+		]
+		self.assertEqual(pushed.call_count, len(applicable))
+		# Every copy that went out is the finished one: switched off, as a
+		# reset leaves them.
+		self.assertTrue(all(int(c.args[0].enabled or 0) == 0 for c in pushed.call_args_list))
 
 	def test_the_request_records_what_happened(self):
 		reset.perform(self.request_row["name"])
