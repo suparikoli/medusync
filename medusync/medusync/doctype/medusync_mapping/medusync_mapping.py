@@ -19,6 +19,7 @@ VALID_DOCEVENTS = {
 
 class MedusyncMapping(Document):
 	def validate(self):
+		self.validate_pair()
 		self.validate_docevents()
 		self.validate_condition()
 		self.validate_field_map()
@@ -49,7 +50,16 @@ class MedusyncMapping(Document):
 			"allow_update": int(self.allow_update or 0),
 			"allow_delete": int(self.allow_delete or 0),
 			"fields": sorted(
-				[row.frappe_field or "", row.medusa_path or "", row.direction or ""]
+				[
+					row.frappe_field or "",
+					row.medusa_path or "",
+					row.direction or "",
+					# A fixed value is behaviour: changing "Products" to
+					# "Raw Material" writes something the rehearsal never
+					# checked. Prefixed so a constant is never mistaken for
+					# a path of the same text.
+					("=" + row.constant_value) if row.get("constant_value") else "",
+				]
 				for row in (self.field_map or [])
 			),
 		}
@@ -88,18 +98,59 @@ class MedusyncMapping(Document):
 			title=frappe._("Not rehearsed yet"),
 		)
 
+	def validate_pair(self):
+		"""A sync is its pair: one Medusa entity, one DocType, one store.
+
+		Two mappings for the same pair are how one sync came to look like
+		two, with each side holding a different half. The pair is also the
+		identity the two systems share, so it cannot change on an existing
+		mapping: a different pair is a different sync.
+		"""
+		from medusync import mapping_sync
+
+		entity = self.get("medusa_entity") or None
+		site = self.get("site") or None
+		if not self.is_new():
+			before = self.get_doc_before_save()
+			if before and (
+				before.document_type,
+				before.get("medusa_entity") or None,
+				before.get("site") or None,
+			) != (self.document_type, entity, site):
+				frappe.throw(
+					frappe._(
+						"A sync is identified by what it pairs. To keep a different Document Type, "
+						"entity or store in step, add a new sync instead of changing this one."
+					),
+					title=frappe._("The pair cannot change"),
+				)
+		other = mapping_sync.find_by_pair(entity, self.document_type, site, exclude=self.name)
+		if other:
+			title = frappe.db.get_value("Medusync Mapping", other, "title") or other
+			frappe.throw(
+				frappe._(
+					"{0} already keeps {1} in step with the store's {2}. Edit that sync rather than "
+					"adding a second one for the same pair."
+				).format(frappe.bold(title), frappe.bold(self.document_type), frappe.bold(entity or "records")),
+				title=frappe._("One sync per pair"),
+			)
+
 	def stamp_identity(self):
-		"""Give the mapping an id both systems share, and a version that
+		"""Give the mapping the id both systems share, and a version that
 		says whose copy is newer.
 
-		The same mapping exists on the Medusa side; edits can start from
-		either. `mapping_uid` pairs the two copies and `version` orders
-		them. A save that is APPLYING a change from the other side carries
-		its version already and must not bump it, or the two sides would
-		ratchet each other upward forever.
+		The id is derived from the pair (see mapping_sync.pair_uid), so the
+		Medusa side arrives at the same one on its own. `version` orders the
+		two copies. A save that is APPLYING a change from the other side
+		carries its version already and must not bump it, or the two sides
+		would ratchet each other upward forever.
 		"""
-		if not self.mapping_uid:
-			self.mapping_uid = frappe.generate_hash(length=32)
+		from medusync import mapping_sync
+
+		# Always, not only when empty: a row installed before the identity
+		# was the pair's converges on its next save, and the other side
+		# resolves by pair anyway.
+		self.mapping_uid = mapping_sync.pair_uid_of(self)
 		if self.flags.get("medusync_applying"):
 			self.version = int(self.version or 1)
 			return
@@ -151,6 +202,13 @@ class MedusyncMapping(Document):
 				frappe.throw(
 					f"Row {row.idx}: '{row.frappe_field}' is not a field on {self.document_type}."
 				)
+			if row.get("constant_value"):
+				# A fixed value has no counterpart in the store. Filling the
+				# path in from the fieldname would claim Medusa has a field
+				# called `item_group`, and the outbound payload would then
+				# advertise one.
+				row.medusa_path = None
+				continue
 			if not row.medusa_path:
 				row.medusa_path = row.frappe_field
 

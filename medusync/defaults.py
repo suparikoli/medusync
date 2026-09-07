@@ -36,7 +36,7 @@ upgrade says so instead of overwriting it.
 
 import frappe
 
-from medusync import config
+from medusync import config, mapping_sync
 from medusync.attention import MAPPING_REQUIRED, clear, flag, notify_attention
 
 #: Bump when the set below changes in a way an existing site should hear
@@ -46,6 +46,9 @@ DEFAULTS_VERSION = 1
 
 #: Every default id starts with this. It is what tells a restore and an
 #: upgrade which mappings they own and which belong to somebody else.
+#: What a default's identity looked like before it became the pair's own
+#: (see mapping_sync.pair_uid). Still recognised so an unmigrated row is
+#: not mistaken for something somebody wrote.
 UID_PREFIX = "default:"
 
 DEFAULT_CATALOGUE_DOCTYPE = "Item"
@@ -75,7 +78,8 @@ def default_mappings() -> list[dict]:
 	catalogue_key = "item_code" if catalogue == DEFAULT_CATALOGUE_DOCTYPE else "name"
 	return [
 		{
-			"uid": UID_PREFIX + "customer",
+			"uid": mapping_sync.pair_uid("customer", "Customer"),
+			"slug": "customer",
 			"title": "Customers",
 			"document_type": "Customer",
 			"medusa_entity": "customer",
@@ -95,7 +99,8 @@ def default_mappings() -> list[dict]:
 			],
 		},
 		{
-			"uid": UID_PREFIX + "catalogue",
+			"uid": mapping_sync.pair_uid("product", catalogue),
+			"slug": "catalogue",
 			"title": "Catalogue",
 			"document_type": catalogue,
 			"medusa_entity": "product",
@@ -114,7 +119,8 @@ def default_mappings() -> list[dict]:
 			],
 		},
 		{
-			"uid": UID_PREFIX + "orders",
+			"uid": mapping_sync.pair_uid("order", "Sales Order"),
+			"slug": "orders",
 			"title": "Orders",
 			"document_type": "Sales Order",
 			"medusa_entity": "order",
@@ -161,7 +167,7 @@ def _free_title(wanted: str, uid: str) -> str:
 	)
 	if not existing or existing.mapping_uid == uid:
 		return wanted
-	suffix = uid.replace(UID_PREFIX, "").replace("_", " ")
+	suffix = uid.split(":")[1] if ":" in uid else uid
 	candidate = f"{wanted} ({suffix})"
 	index = 2
 	while frappe.db.exists(config.MAPPING_DOCTYPE, candidate):
@@ -222,6 +228,13 @@ def _stamp(doc) -> None:
 	)
 
 
+def _find(spec: dict) -> str | None:
+	"""The mapping this default lives in: by its identity, or by its pair
+	for a row installed before the identity was the pair's."""
+	name = frappe.db.get_value(config.MAPPING_DOCTYPE, {"mapping_uid": spec["uid"]}, "name")
+	return name or mapping_sync.find_by_pair(spec["medusa_entity"], spec["document_type"])
+
+
 def _create(spec: dict):
 	doc = frappe.new_doc(config.MAPPING_DOCTYPE)
 	doc.title = _free_title(spec["title"], spec["uid"])
@@ -249,7 +262,7 @@ def restore_defaults(reason: str = "restore") -> dict:
 			skipped.append({"uid": spec["uid"], "reason": f"no DocType {spec['document_type']}"})
 			continue
 
-		name = frappe.db.get_value(config.MAPPING_DOCTYPE, {"mapping_uid": spec["uid"]}, "name")
+		name = _find(spec)
 		if not name:
 			doc = _create(spec)
 		else:
@@ -290,7 +303,7 @@ def apply_defaults(force: bool = False, reason: str = "upgrade") -> dict:
 			)
 			continue
 
-		name = frappe.db.get_value(config.MAPPING_DOCTYPE, {"mapping_uid": spec["uid"]}, "name")
+		name = _find(spec)
 		if not name:
 			doc = _create(spec)
 			result["created"].append({"uid": spec["uid"], "name": doc.name})
@@ -359,4 +372,16 @@ def installed_version() -> int:
 
 def owns(uid: str | None) -> bool:
 	"""Is this one of ours? The question a restore and an upgrade both ask."""
-	return bool(uid) and str(uid).startswith(UID_PREFIX)
+	if not uid:
+		return False
+	if str(uid).startswith(UID_PREFIX):
+		return True
+	return uid in {spec["uid"] for spec in default_mappings()}
+
+
+def uid_for(slug: str) -> str | None:
+	"""The identity of one shipped default, by its short name."""
+	for spec in default_mappings():
+		if spec.get("slug") == slug:
+			return spec["uid"]
+	return None

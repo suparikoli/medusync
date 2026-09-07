@@ -13,3 +13,4 @@ medusync.patches.v1_2.backfill_mapping_identity
 medusync.patches.v1_3.install_sync_selection
 medusync.patches.v1_4.install_order_source_field
 medusync.patches.v1_5.rename_handler_packs
+medusync.patches.v1_6.pair_identity

@@ -49,7 +49,7 @@ class DefaultsCase(IntegrationTestCase):
 				frappe.delete_doc(MAPPING, name, force=1, ignore_permissions=True)
 		# Anything restore_defaults created that was not here before.
 		for row in frappe.get_all(MAPPING, fields=["name", "mapping_uid"]):
-			if row.mapping_uid and row.mapping_uid.startswith(defaults.UID_PREFIX):
+			if defaults.owns(row.mapping_uid):
 				if row.mapping_uid not in self._existing and frappe.db.exists(MAPPING, row.name):
 					frappe.delete_doc(MAPPING, row.name, force=1, ignore_permissions=True)
 		frappe.db.set_single_value("Medusync Settings", "defaults_version", self._before_version)
@@ -57,7 +57,7 @@ class DefaultsCase(IntegrationTestCase):
 		super().tearDown()
 
 	def _uid_of(self, slug):
-		return defaults.UID_PREFIX + slug
+		return defaults.uid_for(slug)
 
 	def _doc(self, slug):
 		name = frappe.db.get_value(MAPPING, {"mapping_uid": self._uid_of(slug)}, "name")
@@ -71,7 +71,7 @@ class TestTheSetItself(DefaultsCase):
 		first = [m["uid"] for m in defaults.default_mappings()]
 		second = [m["uid"] for m in defaults.default_mappings()]
 		self.assertEqual(first, second)
-		self.assertTrue(all(uid.startswith(defaults.UID_PREFIX) for uid in first))
+		self.assertTrue(all(defaults.owns(uid) for uid in first))
 
 	def test_the_identifiers_are_unique(self):
 		uids = [m["uid"] for m in defaults.default_mappings()]
@@ -133,7 +133,7 @@ class TestRestoring(DefaultsCase):
 	def test_it_undoes_an_edit_to_a_default(self):
 		defaults.restore_defaults()
 		spec = defaults.default_mappings()[0]
-		doc = self._doc(spec["uid"][len(defaults.UID_PREFIX) :])
+		doc = self._doc(spec["slug"])
 		doc.key_field = "name"
 		doc.field_map = []
 		doc.save(ignore_permissions=True)

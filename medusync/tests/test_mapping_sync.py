@@ -9,6 +9,8 @@ resolve by version, and on a tie ERPNext wins, because ERPNext owns which
 documents are allowed to sync at all.
 """
 
+from unittest.mock import patch
+
 import frappe
 
 try:
@@ -30,7 +32,7 @@ def _mapping(title, **kw):
 			"document_type": kw.pop("document_type", "Customer"),
 			"direction": kw.pop("direction", "Two-way"),
 			"key_field": kw.pop("key_field", "email_id"),
-			"medusa_entity": kw.pop("medusa_entity", "customer"),
+			"medusa_entity": kw.pop("medusa_entity", "probe_customer"),
 		}
 	)
 	fields = kw.pop("fields", [{"frappe_field": "email_id", "medusa_path": "email", "direction": "Two-way"}])
@@ -126,7 +128,7 @@ class TestCanonicalForm(IntegrationTestCase):
 		self.assertEqual(canon["uid"], doc.mapping_uid)
 		self.assertEqual(canon["version"], doc.version)
 		self.assertEqual(canon["doctype"], "Customer")
-		self.assertEqual(canon["medusa_entity"], "customer")
+		self.assertEqual(canon["medusa_entity"], "probe_customer")
 		self.assertEqual(canon["direction"], "push")
 		self.assertEqual(canon["key_erpnext_field"], "email_id")
 		self.assertEqual(len(canon["fields"]), 3)
@@ -156,7 +158,7 @@ class TestConflictResolution(IntegrationTestCase):
 			"version": 1,
 			"name": "T Inbound New",
 			"enabled": True,
-			"medusa_entity": "customer",
+			"medusa_entity": "probe_customer",
 			"doctype": "Customer",
 			"direction": "both",
 			"key_medusa_field": "email",
@@ -167,7 +169,8 @@ class TestConflictResolution(IntegrationTestCase):
 		self.assertEqual(res["action"], "created")
 		self._made.append(res["name"])
 		doc = frappe.get_doc("Medusync Mapping", res["name"])
-		self.assertEqual(doc.mapping_uid, "uid-new-1")
+		# Stored under the pair's own identity, whatever the sender called it.
+		self.assertEqual(doc.mapping_uid, mapping_sync.pair_uid("probe_customer", "Customer"))
 		self.assertEqual(doc.document_type, "Customer")
 		self.assertEqual(len(doc.field_map), 1)
 		# First contact must not switch on a rule nobody reviewed here.
@@ -226,7 +229,7 @@ class TestConflictResolution(IntegrationTestCase):
 			"version": 1,
 			"name": "T No Echo",
 			"enabled": True,
-			"medusa_entity": "customer",
+			"medusa_entity": "probe_customer",
 			"doctype": "Customer",
 			"direction": "both",
 			"key_medusa_field": "email",
@@ -239,9 +242,64 @@ class TestConflictResolution(IntegrationTestCase):
 		# the version must be the one that arrived, not bumped by our own save
 		self.assertEqual(doc.version, 1)
 
-	def test_delete_is_a_disable_not_a_destroy(self):
+	def test_delete_removes_the_local_copy(self):
+		# This used to disable rather than delete, which left a switched-off
+		# twin behind for every mapping removed on the other side.
 		doc = self._make("T Delete")
 		res = mapping_sync.apply_deleted(doc.mapping_uid)
-		self.assertEqual(res["action"], "disabled")
-		doc.reload()
-		self.assertEqual(doc.enabled, 0)
+		self.assertEqual(res["action"], "deleted")
+		self.assertFalse(frappe.db.exists("Medusync Mapping", res["name"]))
+
+
+class TestDeletingPropagates(IntegrationTestCase):
+	"""A mapping removed on one side is removed on the other.
+
+	It used to be disabled instead, which left a switched-off twin behind
+	for every deletion — one configuration showing up as two.
+	"""
+
+	UID = "uid-delete-propagation"
+	TITLE = "T Delete Propagation"
+
+	def tearDown(self):
+		if frappe.db.exists("Medusync Mapping", self.TITLE):
+			frappe.delete_doc("Medusync Mapping", self.TITLE, force=1, ignore_permissions=True)
+		super().tearDown()
+
+	def _make(self):
+		doc = frappe.new_doc("Medusync Mapping")
+		doc.update(
+			{
+				"title": self.TITLE,
+				"enabled": 0,
+				"document_type": "Customer",
+				"direction": "Two-way",
+				"key_field": "name",
+				"medusa_entity": "probe_customer",
+				"mapping_uid": self.UID,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		return doc
+
+	def test_a_deletion_from_the_other_side_removes_it(self):
+		# The other side names the identity both copies share: the pair's.
+		doc = self._make()
+		result = mapping_sync.apply_deleted(doc.mapping_uid)
+		self.assertEqual(result["action"], "deleted")
+		self.assertFalse(frappe.db.exists("Medusync Mapping", self.TITLE))
+
+	def test_a_deletion_for_a_uid_we_never_had_is_not_an_error(self):
+		result = mapping_sync.apply_deleted("uid-we-never-saw")
+		self.assertEqual(result["action"], "skipped")
+		self.assertEqual(result["reason"], "already_absent")
+
+	def test_applying_a_deletion_does_not_echo_it_back(self):
+		# Without the guard the trash hook would push mapping.deleted out
+		# again, and the two sides would bounce the deletion between them.
+		self._make()
+		sent = []
+		with patch.object(mapping_sync, "push_mapping", lambda *a, **k: sent.append(a)):
+			mapping_sync.apply_deleted(self.UID)
+		self.assertEqual(sent, [])
+		self.assertFalse(frappe.flags.get("medusync_applying"))

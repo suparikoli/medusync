@@ -1,4 +1,8 @@
 app_name = "medusync"
+
+# The field mapper is shared by the Medusync Mapping form and the Mappings
+# page, so it is bundled app-wide rather than living in one doctype's JS.
+app_include_js = ["medusync.bundle.js"]
 app_title = "Medusync"
 app_publisher = "Mithtech Innovative Solutions PVT LTD"
 app_description = "Two-way sync between a Frappe/ERPNext site and a Medusa v2 backend."
@@ -50,6 +54,7 @@ doc_events = {
 			"medusync.sites.clear_cache",
 			"medusync.warehouses.clear_cache",
 			"medusync.price_lists.clear_cache",
+			"medusync.mapping_sync.on_site_update",
 		],
 		"on_trash": [
 			"medusync.sites.clear_cache",
