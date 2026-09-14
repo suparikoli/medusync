@@ -194,11 +194,13 @@ class MedusyncMapping(Document):
 	def validate_field_map(self):
 		if self.include_all_fields or not self.field_map:
 			return
+		from medusync import links
+
 		meta = frappe.get_meta(self.document_type)
 		valid = {df.fieldname for df in meta.fields}
 		valid.update({"name", "owner", "creation", "modified", "docstatus"})
 		for row in self.field_map:
-			if row.frappe_field not in valid:
+			if row.frappe_field not in valid and not links.is_link_key(row.frappe_field):
 				frappe.throw(
 					f"Row {row.idx}: '{row.frappe_field}' is not a field on {self.document_type}."
 				)

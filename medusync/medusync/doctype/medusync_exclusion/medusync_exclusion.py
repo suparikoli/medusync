@@ -8,9 +8,9 @@ from frappe.model.document import Document
 class MedusyncExclusion(Document):
 	"""One record kept out of the sync, for one store or for all of them.
 
-	The central Don't Sync list. Adding an entry here updates the
-	document's own selector, so the form and the list can never tell an
-	operator two different stories.
+	The central Don't Sync list, for doctypes under Sync Selection in
+	"unless excluded" mode. The form's Medusa sync button writes the same
+	rows.
 	"""
 
 	def validate(self):
@@ -37,13 +37,3 @@ class MedusyncExclusion(Document):
 					f" for {self.site}" if self.site else "",
 				)
 			)
-
-	def on_update(self):
-		from medusync import selection
-
-		selection.apply_to_document(self)
-
-	def on_trash(self):
-		from medusync import selection
-
-		selection.remove_from_document(self)

@@ -2,15 +2,17 @@
 """Customer address sync (Medusa -> ERPNext Address).
 
 A flat field mapping cannot create ERPNext Address docs (a separate doctype
-linked to Customer via Dynamic Link), so the Customer branch of
- hands the normalized  list here
-after the Customer is saved. Idempotent by the  Custom Field
-(re-push updates the same Address); stale addresses (previously synced, now
+linked to Customer via Dynamic Link), so the Customer branch of the mapped
+upsert hands the normalized address list here after the Customer is saved.
+Idempotent by the store's address id, held in Medusync Link (a re-push
+updates the same Address); stale addresses (previously synced, now
 absent from the incoming list) are DISABLED, never destroyed (safe-delete).
 Never raises: a bad address must not fail the whole customer sync.
 """
 
 import frappe
+
+from medusync import links
 
 
 def _resolve_country(iso2):
@@ -47,9 +49,8 @@ def sync_customer_addresses(customer_name, addresses):
                 skipped.append({"medusa_address_id": mid, "reason": "country %r not in ERPNext" % a.get("country_code")})
                 continue
             seen.add(mid)
-            existing = frappe.db.get_value("Address", {"medusa_address_id": mid}, "name")
+            existing = links.name_for("Address", mid, entity="address")
             doc = frappe.get_doc("Address", existing) if existing else frappe.new_doc("Address")
-            doc.medusa_address_id = mid
             doc.address_title = a.get("address_title") or customer_name
             doc.address_type = a.get("address_type") or "Billing"
             doc.address_line1 = a.get("address_line1") or "-"
@@ -70,6 +71,7 @@ def sync_customer_addresses(customer_name, addresses):
                 doc.append("links", {"link_doctype": "Customer", "link_name": customer_name})
             doc.flags.ignore_mandatory = True
             doc.save(ignore_permissions=True)
+            links.remember("Address", doc.name, mid, entity="address")
             synced.append(doc.name)
         except Exception as exc:
             frappe.db.rollback()
@@ -79,12 +81,12 @@ def sync_customer_addresses(customer_name, addresses):
     # are no longer in the incoming set.
     disabled = []
     prior = frappe.get_all(
-        "Address",
-        filters={"medusa_address_id": ["is", "set"], "disabled": 0},
-        fields=["name", "medusa_address_id"],
+        links.LINK_DOCTYPE,
+        filters={"document_type": "Address", "medusa_entity": "address", "site": links.current_site()},
+        fields=["document_name as name", "medusa_id"],
     )
     for p in prior:
-        if p.medusa_address_id in seen:
+        if p.medusa_id in seen or frappe.db.get_value("Address", p.name, "disabled"):
             continue
         linked = frappe.db.exists(
             "Dynamic Link",

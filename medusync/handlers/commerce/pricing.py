@@ -1,16 +1,14 @@
 # Pricing + B2B: ERPNext -> Medusa. ERPNext price always wins.
-#   Item Price -> variant.price.set        (lists a store maps as a base price)
-#   Item Price -> variant.tier_price.set   (lists a store maps as a B2B tier)
+#   Item Price -> variant.price.set        (lists a store maps as its price)
 #   Item       -> variant.meta.set         (MOQ = min_order_qty)
 #   Customer   -> customer.group.set       (B2B customer group)
 #
-# Which price list is which is per store, not per site: the same list can be
-# the shelf price at one store and a wholesale tier at another, and a cost
+# Which price list reaches which store is per store, not per site, and a cost
 # list can be marked Don't Sync so it never leaves. See medusync.price_lists.
 
 import frappe
 
-from medusync import config, price_lists
+from medusync import config, links, price_lists
 from medusync.outbound import emit
 
 
@@ -58,33 +56,6 @@ def on_item_price(doc, method=None):
                 per_site=lambda site_id, body: body if site_id in base_stores else None,
             )
 
-        tier_codes = {
-            r["site_id"]: r["tier_code"]
-            for r in rules
-            if r["role"] == price_lists.ROLE_TIER and r["tier_code"]
-        }
-        if tier_codes:
-            payload = {
-                "sku": doc.item_code,
-                "price_list": doc.price_list,
-                "amount": float(doc.price_list_rate or 0),
-                "currency": doc.currency,
-                # packing_unit (units per pack) is the volume bracket: several
-                # Item Prices per (item, list) at different packing_units form a
-                # quantity ladder. 0/blank -> the single (min_quantity 1) price.
-                "min_quantity": int(doc.get("packing_unit") or 1),
-                "deleted": bool(deleted),
-            }
-            _deliver(
-                "variant.tier_price.set",
-                payload,
-                ref,
-                "Item Price",
-                doc.name,
-                per_site=lambda site_id, body: (
-                    {**body, "tier_code": tier_codes[site_id]} if site_id in tier_codes else None
-                ),
-            )
     except Exception:
         frappe.log_error(title="medusync pricing on_item_price failed", message=frappe.get_traceback())
 
@@ -107,7 +78,7 @@ def on_customer_group_link(doc, method=None):
         if not grp:
             return
         payload = {
-            "medusa_customer_id": doc.get("medusa_customer_id"),
+            "medusa_customer_id": links.medusa_id_for("Customer", doc.name, entity="customer"),
             "email": doc.get("email_id"),
             "group": grp,
         }

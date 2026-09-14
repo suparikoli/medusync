@@ -14,6 +14,7 @@ recognised as an inbound write and is not echoed back to the store.
 """
 
 import frappe
+from medusync import invoicing, links
 from medusync.handlers.commerce.sales_financials import apply_financials
 from medusync.handlers.commerce.address_sync import sync_customer_addresses
 from medusync.handlers.commerce.contact_sync import sync_customer_contact
@@ -98,28 +99,31 @@ def _set_fields(doc, payload):
 def _upsert_sales_doc(doctype, key_field, key_value, payload, event, event_id):
 	payload = dict(payload)
 	payload.pop("grand_total", None)  # read-only / computed
-	medusa_customer_id = payload.pop("medusa_customer_id", None)
+	opts = invoicing.options()
+	doctype = invoicing.target_doctype(doctype, opts)
+	taken = links.take_link_keys(payload, doctype)
+	if links.is_link_key(key_field) and key_value not in (None, ""):
+		taken.setdefault(key_field, key_value)
+	order_id = taken.get("medusa_order_id")
+	# The customer id names the Customer, not this document.
+	medusa_customer_id = taken.pop("medusa_customer_id", None) or payload.pop("medusa_customer_id", None)
 	items = payload.pop("medusa_items", None) or []
 	contact_email = payload.get("contact_email")
 
 	customer = None
 	if medusa_customer_id:
-		customer = frappe.db.get_value(
-			"Customer", {"medusa_customer_id": medusa_customer_id}, "name"
-		)
+		customer = links.name_for("Customer", medusa_customer_id, entity="customer")
 	if not customer and contact_email:
 		customer = frappe.db.get_value("Customer", {"email_id": contact_email}, "name")
 
-	existing = (
-		frappe.db.get_value(doctype, {key_field: key_value}, "name")
-		if key_value not in (None, "")
-		else None
-	)
+	existing = links.find_by_key(doctype, key_field, key_value)
 
 	if existing:
 		doc = frappe.get_doc(doctype, existing)
-		_set_fields(doc, payload)
-		doc.save(ignore_permissions=True)
+		if doc.docstatus == 0:
+			_set_fields(doc, payload)
+			doc.save(ignore_permissions=True)
+		links.remember_all(doctype, doc.name, taken)
 		return {"doctype": doctype, "name": doc.name, "status": "updated"}
 
 	if not customer:
@@ -130,8 +134,6 @@ def _upsert_sales_doc(doctype, key_field, key_value, payload, event, event_id):
 
 	doc = frappe.new_doc(doctype)
 	doc.customer = customer
-	# Stamp the mapping key (e.g. medusa_order_id) so a retry updates this
-	# doc instead of creating a duplicate.
 	if key_field and key_field != "name" and key_value not in (None, "") and doc.meta.get_field(key_field):
 		doc.set(key_field, key_value)
 	if not doc.get("company"):
@@ -152,8 +154,13 @@ def _upsert_sales_doc(doctype, key_field, key_value, payload, event, event_id):
 	if not doc.get("items"):
 		raise Exception("no valid line items for %s" % doctype)
 	apply_financials(doc, customer, payload)
-	doc.insert(ignore_permissions=True)
-	return {"doctype": doctype, "name": doc.name, "status": "created"}
+	if doctype == "Sales Invoice":
+		invoicing.insert_invoice(doc, payload, opts)
+	else:
+		doc.insert(ignore_permissions=True)
+	links.remember_all(doctype, doc.name, taken)
+	made = invoicing.after_create(doc, payload, opts, order_id)
+	return {"doctype": doctype, "name": doc.name, "status": "created", "made": made}
 
 
 def upsert_via_mapping(
@@ -179,11 +186,12 @@ def upsert_via_mapping(
 	if doctype in _SALES_DOCS and not is_delete:
 		return _upsert_sales_doc(doctype, key_field, key_value, payload, event, event_id)
 
-	existing = (
-		frappe.db.get_value(doctype, {key_field: key_value}, "name")
-		if key_value not in (None, "")
-		else None
-	)
+	payload = dict(payload)
+	taken = links.take_link_keys(payload, doctype)
+	if links.is_link_key(key_field) and key_value not in (None, ""):
+		taken.setdefault(key_field, key_value)
+
+	existing = links.find_by_key(doctype, key_field, key_value)
 
 	if is_delete:
 		if not existing:
@@ -204,6 +212,7 @@ def upsert_via_mapping(
 			doc.db_set("status", "Cancelled")
 			return {"doctype": doctype, "name": existing, "status": "updated", "action": "cancelled"}
 		frappe.delete_doc(doctype, existing, ignore_permissions=True)
+		links.forget(doctype, existing)
 		return {"doctype": doctype, "name": existing, "status": "updated", "action": "deleted"}
 
 	if existing:
@@ -212,17 +221,19 @@ def upsert_via_mapping(
 		doc = frappe.get_doc(doctype, existing)
 		_set_fields(doc, payload)
 		doc.save(ignore_permissions=True)
+		links.remember_all(doctype, doc.name, taken)
 		return _cust_result(doctype, doc, addresses, phone, "updated")
 
 	# Item dedupe: a stub may already exist under this item_code (created
-	# as a Sales Order line) with no medusa_product_id — update it rather
-	# than colliding on the primary key.
+	# as a Sales Order line) with no product link — update it rather than
+	# colliding on the primary key.
 	if doctype == "Item" and payload.get("item_code") and frappe.db.exists(
 		"Item", payload.get("item_code")
 	):
 		doc = frappe.get_doc("Item", payload.get("item_code"))
 		_set_fields(doc, payload)
 		doc.save(ignore_permissions=True)
+		links.remember_all(doctype, doc.name, taken)
 		return _cust_result(doctype, doc, addresses, phone, "updated")
 
 	if not allow_create:
@@ -238,4 +249,5 @@ def upsert_via_mapping(
 			doc.get("email_id") or (str(key_value) if key_value else None) or "Medusa Customer"
 		)
 	doc.insert(ignore_permissions=True)
+	links.remember_all(doctype, doc.name, taken)
 	return _cust_result(doctype, doc, addresses, phone, "created")

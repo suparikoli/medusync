@@ -47,23 +47,12 @@ class MedusyncSettings(Document):
 			seen.add(name)
 
 	def on_update(self):
-		"""Put the selector where it now belongs, and tell the stores.
+		"""Tell the stores when the catalogue doctype moves.
 
-		Both are done here rather than in a patch because an operator can
-		change the catalogue doctype at any time, and the plugin's
-		"link to an existing product" search would otherwise keep looking
-		in the old one.
+		Done here rather than in a patch because an operator can change the
+		catalogue doctype at any time, and the plugin's "link to an existing
+		product" search would otherwise keep looking in the old one.
 		"""
-		from medusync import selection
-
-		try:
-			selection.ensure_selector_fields()
-		except Exception:
-			frappe.log_error(
-				title="Medusync could not provision the sync selector",
-				message=frappe.get_traceback(),
-			)
-
 		before = (self.get_doc_before_save() or {}).get("products_doctype") if self.get_doc_before_save() else None
 		if before is not None and before == self.products_doctype:
 			return

@@ -41,6 +41,22 @@ rehearses the pull half for a pull or two-way mapping and fails on a
 store-required field nobody sends; ERPNext's outbound rehearsal asks the
 store what it requires and fails the same way. That was item 3 below.
 
+## Settled on 2026-09-12: neither app adds a field on its own
+
+Installing medusync put a row of Medusa fields on Item, Customer, the
+sales doctypes, Address and Price List, and every Settings save put a
+"Sync with Medusa" selector on the catalogue doctype. Now nothing is
+added unless somebody presses the button: `medusync.reference_fields`
+holds the catalogue of what the connector can add, Medusync Settings →
+"Reference fields…" adds or removes one at a time (removal refuses a
+field that holds values), and the mapper offers to create a field a
+mapping names that the doctype lacks. The selector goes only on
+doctypes listed under Sync Selection and comes off when unlisted. A
+shipped default that names a missing field is written without that pair
+and flagged "Field Missing" with the way to complete it. On the Medusa
+side the editor no longer fills the pair list when a doctype or entity
+is picked; "Auto-map fields" does that on request.
+
 ## Built this week, verified against both running stacks
 
 | Piece | Where |

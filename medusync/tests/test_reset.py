@@ -303,16 +303,16 @@ class TestWhatAResetDoes(ResetCase):
 		self.assertEqual(frappe.db.count("Medusync Exclusion"), before)
 
 	def test_the_cross_system_ids_survive(self):
-		rows = frappe.get_all(
-			"Customer", filters={"medusa_customer_id": ["is", "set"]}, fields=["name", "medusa_customer_id"], limit=1
-		)
-		if not rows:
-			self.skipTest("no linked Customer to check")
-		before = rows[0]
+		from medusync import links
+
+		customer = frappe.get_all("Customer", fields=["name"], limit=1)
+		if not customer:
+			self.skipTest("no Customer to link")
+		links.remember("Customer", customer[0].name, "cus_reset_keep", entity="customer", site=self.site)
 		reset.perform(self.request_row["name"])
 		self.assertEqual(
-			frappe.db.get_value("Customer", before.name, "medusa_customer_id"),
-			before.medusa_customer_id,
+			links.medusa_id_for("Customer", customer[0].name, site=self.site, entity="customer"),
+			"cus_reset_keep",
 		)
 
 	def test_it_rewrites_quietly_then_sends_the_whole_list_once(self):

@@ -37,7 +37,7 @@ upgrade says so instead of overwriting it.
 import frappe
 
 from medusync import config, mapping_sync
-from medusync.attention import MAPPING_REQUIRED, clear, flag, notify_attention
+from medusync.attention import FIELD_MISSING, MAPPING_REQUIRED, clear, flag, notify_attention
 
 #: Bump when the set below changes in a way an existing site should hear
 #: about. Recorded on Medusync Settings so an upgrade can tell whether
@@ -176,8 +176,28 @@ def _free_title(wanted: str, uid: str) -> str:
 	return candidate
 
 
-def _write_spec(doc, spec: dict) -> None:
-	"""Put the shipped shape onto a document, in memory."""
+def _missing_fields(spec: dict) -> list[str]:
+	"""Fields the spec names that this site's doctype does not have.
+
+	Medusa ids are link keys held in Medusync Link and never count. Any
+	other field the doctype lacks leaves the mapping written without that
+	pair, and saying so.
+	"""
+	from medusync import links
+
+	meta = frappe.get_meta(spec["document_type"])
+	standard = {"name", "owner", "creation", "modified", "docstatus"}
+	named = [f for f, _path, _direction in spec["fields"]]
+	if spec.get("key_field") and spec["key_field"] not in named:
+		named.append(spec["key_field"])
+	# A link key lives in Medusync Link, not on the doctype, so it is never missing.
+	return [f for f in named if f not in standard and not links.is_link_key(f) and not meta.get_field(f)]
+
+
+def _write_spec(doc, spec: dict) -> list[str]:
+	"""Put the shipped shape onto a document, in memory. Returns the
+	fields left out because the doctype does not have them."""
+	missing = _missing_fields(spec)
 	doc.update(
 		{
 			"enabled": 0,
@@ -195,6 +215,8 @@ def _write_spec(doc, spec: dict) -> None:
 	)
 	doc.set("field_map", [])
 	for erpnext_field, medusa_path, direction in spec["fields"]:
+		if erpnext_field in missing:
+			continue
 		doc.append(
 			"field_map",
 			{"frappe_field": erpnext_field, "medusa_path": medusa_path, "direction": direction},
@@ -205,6 +227,22 @@ def _write_spec(doc, spec: dict) -> None:
 	doc.tested_signature = None
 	doc.last_test_status = "Untested"
 	doc.last_test_report = None
+	return missing
+
+
+def _say_what_is_missing(doc, missing: list[str]) -> None:
+	"""Flag the mapping, or clear an old flag once the fields are there."""
+	if missing:
+		flag(
+			doc.name,
+			FIELD_MISSING,
+			frappe._(
+				"{0} has no {1}. Add it under Medusync Settings → Reference fields, or from the "
+				"mapper, then apply the defaults again to complete this mapping."
+			).format(doc.document_type, ", ".join(missing)),
+		)
+	elif doc.get("attention") == FIELD_MISSING:
+		clear(doc.name)
 
 
 def spec_signature(spec: dict) -> str:
@@ -239,11 +277,12 @@ def _create(spec: dict):
 	doc = frappe.new_doc(config.MAPPING_DOCTYPE)
 	doc.title = _free_title(spec["title"], spec["uid"])
 	doc.mapping_uid = spec["uid"]
-	_write_spec(doc, spec)
+	missing = _write_spec(doc, spec)
 	doc.flags.ignore_permissions = True
 	doc.insert(ignore_permissions=True)
 	_stamp(doc)
 	clear(doc.name)
+	_say_what_is_missing(doc, missing)
 	return doc
 
 
@@ -267,11 +306,12 @@ def restore_defaults(reason: str = "restore") -> dict:
 			doc = _create(spec)
 		else:
 			doc = frappe.get_doc(config.MAPPING_DOCTYPE, name)
-			_write_spec(doc, spec)
+			missing = _write_spec(doc, spec)
 			doc.flags.ignore_permissions = True
 			doc.save(ignore_permissions=True)
 			_stamp(doc)
 			clear(doc.name)
+			_say_what_is_missing(doc, missing)
 		restored.append({"uid": spec["uid"], "name": doc.name})
 
 	frappe.db.set_single_value("Medusync Settings", "defaults_version", DEFAULTS_VERSION)
@@ -332,12 +372,13 @@ def apply_defaults(force: bool = False, reason: str = "upgrade") -> dict:
 			result["flagged"].append({"uid": spec["uid"], "name": doc.name})
 			continue
 
-		_write_spec(doc, spec)
+		missing = _write_spec(doc, spec)
 		if doc.test_signature() == current and not force:
 			# Already exactly what we would have written. Stamp it so a
 			# later upgrade knows, and say nothing.
 			_stamp(doc)
 			clear(doc.name)
+			_say_what_is_missing(doc, missing)
 			result["unchanged"].append({"uid": spec["uid"], "name": doc.name})
 			continue
 
@@ -345,6 +386,7 @@ def apply_defaults(force: bool = False, reason: str = "upgrade") -> dict:
 		doc.save(ignore_permissions=True)
 		_stamp(doc)
 		clear(doc.name)
+		_say_what_is_missing(doc, missing)
 		result["applied"].append({"uid": spec["uid"], "name": doc.name})
 
 	# The version is the site's claim to have the current set. It only

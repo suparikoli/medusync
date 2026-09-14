@@ -21,7 +21,7 @@ receipt against an order erased the first.
 
 import frappe
 
-from medusync import config
+from medusync import config, links
 from medusync.outbound import emit
 
 SOURCE_FIELD = "medusa_order_source"
@@ -52,10 +52,10 @@ def source_of(doc) -> str:
 	storefront showing "placed online" for a phone order is worse than
 	showing nothing.
 	"""
-	explicit = (doc.get(SOURCE_FIELD) or "").strip()
+	explicit = (links.value_for(doc, SOURCE_FIELD) or "").strip()
 	if explicit:
 		return explicit
-	return SOURCE_MEDUSA if doc.get(ORDER_ID_FIELD) else SOURCE_ERPNEXT
+	return SOURCE_MEDUSA if links.value_for(doc, ORDER_ID_FIELD) else SOURCE_ERPNEXT
 
 
 def payment_of(doc) -> dict:
@@ -77,8 +77,8 @@ def payment_of(doc) -> dict:
 	else:
 		status = "unpaid"
 	return {
-		"method": doc.get("medusa_payment_method") or None,
-		"reference": doc.get("medusa_payment_reference") or None,
+		"method": links.value_for(doc, "medusa_payment_method") or None,
+		"reference": links.value_for(doc, "medusa_payment_reference") or None,
 		"currency": doc.get("currency") or None,
 		"total": total,
 		"paid": paid,
@@ -97,9 +97,9 @@ def _order_id_for(reference_doctype: str, reference_name: str) -> str | None:
 	if not reference_doctype or not reference_name:
 		return None
 	if reference_doctype == "Sales Order":
-		return frappe.db.get_value("Sales Order", reference_name, ORDER_ID_FIELD)
+		return links.medusa_id_for("Sales Order", reference_name, entity="order")
 	if reference_doctype == "Sales Invoice":
-		direct = frappe.db.get_value("Sales Invoice", reference_name, ORDER_ID_FIELD)
+		direct = links.medusa_id_for("Sales Invoice", reference_name, entity="order")
 		if direct:
 			return direct
 		rows = frappe.get_all(
@@ -109,7 +109,7 @@ def _order_id_for(reference_doctype: str, reference_name: str) -> str | None:
 			limit=1,
 		)
 		if rows:
-			return frappe.db.get_value("Sales Order", rows[0].sales_order, ORDER_ID_FIELD)
+			return links.medusa_id_for("Sales Order", rows[0].sales_order, entity="order")
 	return None
 
 
@@ -122,7 +122,7 @@ def on_sales_order(doc, method=None) -> None:
 	try:
 		if not _guard():
 			return
-		order_id = doc.get(ORDER_ID_FIELD)
+		order_id = links.value_for(doc, ORDER_ID_FIELD)
 		if not order_id:
 			# An order Medusa has never seen has nothing to be told about.
 			return

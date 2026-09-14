@@ -4,3 +4,4 @@
 // App-wide bundle. Everything here is needed in more than one place.
 
 import "./mapper.bundle.js";
+import "./selection.js";

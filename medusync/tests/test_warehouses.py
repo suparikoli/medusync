@@ -31,7 +31,7 @@ def syncable_item() -> str | None:
 
 	The push tests go through the real selection filter, so borrowing
 	whichever Item happens to be first would make them depend on what
-	somebody last unticked on this site.
+	somebody last excluded on this site.
 	"""
 	excluded = {
 		row.document_name
@@ -41,10 +41,8 @@ def syncable_item() -> str | None:
 			fields=["document_name"],
 		)
 	}
-	for row in frappe.get_all("Item", fields=["name", selection.SYNC_FIELD], limit=200):
+	for row in frappe.get_all("Item", fields=["name"], limit=200):
 		if row.name in excluded:
-			continue
-		if row.get(selection.SYNC_FIELD) == 0:
 			continue
 		return row.name
 	return None

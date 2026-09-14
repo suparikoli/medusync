@@ -1,17 +1,15 @@
 # Copyright (c) 2026, Mithtech Innovative Solutions PVT LTD and contributors
 # For license information, please see license.txt
 
-"""A fresh install must end up with the same schema as an upgraded one.
+"""The connector adds nothing to any doctype, at install or ever.
 
-`frappe.installer.install_app` marks every patch as completed before
-`after_install` runs, so a patch that creates a custom field never runs on
-the site that most needs it. `install.install_schema()` is the answer, and
-the risk is that the next schema patch gets written and not added to it —
-which nothing would notice until somebody installed on a new machine and
-the first push failed.
+Medusa ids live in Medusync Link and the sync decision in Medusync
+Exclusion / Inclusion. An older site that still carries the fields has
+their values moved into links and the fields dropped.
 """
 
 import pathlib
+from unittest.mock import patch
 
 import frappe
 
@@ -21,49 +19,56 @@ except ImportError:  # pragma: no cover - older frappe
 	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
 from medusync import install
-from medusync.patches.v1_1 import install_reference_fields
+
+APP = pathlib.Path(frappe.get_app_path("medusync"))
 
 
 def _listed_patches():
-	path = pathlib.Path(frappe.get_app_path("medusync")) / "patches.txt"
-	for line in path.read_text(encoding="utf-8").splitlines():
+	for line in (APP / "patches.txt").read_text(encoding="utf-8").splitlines():
 		line = line.strip()
 		if line and not line.startswith(("#", "[")):
 			yield line
 
 
-class TestFreshInstallSchema(IntegrationTestCase):
-	def test_every_schema_patch_is_run_at_install_too(self):
-		"""A patch whose name says it installs something must be here."""
-		listed = [p for p in _listed_patches() if p.rsplit(".", 1)[-1].startswith("install_")]
-		self.assertTrue(listed, "patches.txt lists no install_ patches — has it moved?")
-		missing = [p for p in listed if p not in install.SCHEMA_PATCHES]
+class TestNothingIsAdded(IntegrationTestCase):
+	def test_after_install_creates_no_custom_field(self):
+		with patch("frappe.custom.doctype.custom_field.custom_field.create_custom_fields") as made:
+			with patch("medusync.install.frappe.db.commit"):
+				install.after_install()
+		self.assertEqual(made.call_count, 0)
+
+	def test_only_the_sync_tick_module_creates_a_custom_field(self):
+		"""One field, from one place.
+
+		Medusa ids and order details still live in Medusync Link, off the
+		document. The single exception is the sync tick, which has to be a
+		real field for a list column and Frappe's own bulk edit to work at
+		all. Anything else reaching for `create_custom_fields` is the old
+		habit coming back.
+		"""
+		offenders = [
+			str(path.relative_to(APP))
+			for path in APP.rglob("*.py")
+			if "tests" not in path.parts
+			and "create_custom_fields" in path.read_text(encoding="utf-8")
+		]
+		self.assertEqual(offenders, ["sync_field.py"])
+
+	def test_the_tick_module_adds_the_tick_and_nothing_else(self):
+		from medusync import sync_field
+
+		with patch("medusync.sync_field.frappe.get_meta") as meta:
+			meta.return_value.get_field.return_value = None
+			meta.return_value.fields = [frappe._dict(fieldname="item_code")]
+			specs = sync_field._field_specs("Item")
+
 		self.assertEqual(
-			missing,
-			[],
-			"these install schema but would not run on a fresh site — add them to "
-			"install.SCHEMA_PATCHES: %s" % missing,
+			[(f["fieldname"], f["fieldtype"]) for f in specs],
+			[("medusync_tab", "Tab Break"), ("medusync_sync", "Check")],
 		)
 
-	def test_each_one_resolves_and_is_callable(self):
-		for path in install.SCHEMA_PATCHES:
+	def test_upgrading_sites_have_their_fields_moved_into_links(self):
+		listed = list(_listed_patches())
+		self.assertIn("medusync.patches.v1_7.move_reference_fields_to_links", listed)
+		for path in listed:
 			self.assertTrue(callable(frappe.get_attr(path + ".execute")), path)
-
-	def test_the_reference_fields_are_on_this_site(self):
-		"""What install_schema creates, checked against the live schema."""
-		for doctype, specs in install_reference_fields.FIELDS.items():
-			if not frappe.db.exists("DocType", doctype):
-				continue
-			for spec in specs:
-				self.assertTrue(
-					frappe.db.exists(
-						"Custom Field", {"dt": doctype, "fieldname": spec["fieldname"]}
-					),
-					f"{doctype}.{spec['fieldname']} is missing",
-				)
-
-	def test_running_it_twice_changes_nothing(self):
-		install.install_schema()
-		before = frappe.db.count("Custom Field", {"fieldname": ["like", "medusa%"]})
-		install.install_schema()
-		self.assertEqual(frappe.db.count("Custom Field", {"fieldname": ["like", "medusa%"]}), before)

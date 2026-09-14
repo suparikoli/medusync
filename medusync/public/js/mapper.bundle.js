@@ -375,12 +375,37 @@ class MedusyncFieldMapper {
 		return boxes.length ? `<div class="mm-req">${boxes.join("")}</div>` : "";
 	}
 
+	/** Rows naming a Frappe field this doctype does not have. Medusa ids
+	 *  are link keys held in Medusync Link and never count as absent. */
+	absentHtml() {
+		const present = new Set(this.here.map((f) => f.fieldname));
+		const standard = new Set(["name", "owner", "creation", "modified", "docstatus"]);
+		const isLinkKey = (f) => /^medusa_[a-z_]+$/.test(f);
+		const absent = this.rows
+			.map((r) => r.frappe_field)
+			.filter(
+				(f, i, all) => f && !present.has(f) && !standard.has(f) && !isLinkKey(f) && all.indexOf(f) === i,
+			);
+		if (!absent.length) return "";
+		const items = absent
+			.map(
+				(f) => `<div class="mm-req-item mm-req-no"><span>✗</span><span class="mm-grow">${mmEsc(f)}
+						<span class="text-muted">· ${__("not a field on {0}", [mmEsc(this.frm.doc.document_type)])}</span></span></div>`,
+			)
+			.join("");
+		return `<div class="mm-req"><div class="mm-req-box">
+			<div class="mm-req-title">${__("Not on {0} yet", [mmEsc(this.frm.doc.document_type)])}</div>
+			${items}
+		</div></div>`;
+	}
+
 	render() {
 		this.$body.html(`
 			${this.styles()}
 			<div class="mm">
 				${this.bannerHtml()}
 				${this.boxesHtml()}
+				${this.absentHtml()}
 				<div class="mm-head">
 					<div class="mm-side">
 						<div class="mm-side-name">${mmEsc(this.frm.doc.document_type)}</div>

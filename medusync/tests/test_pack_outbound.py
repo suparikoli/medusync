@@ -46,7 +46,8 @@ class TestPackOutboundHooks(IntegrationTestCase):
 	def test_hooks_py_names_no_business_doctype(self):
 		from medusync import hooks
 
-		configured = set(hooks.doc_events) - {"*", "Medusync Mapping", "Medusync Site"}
+		ours = {"*", "Medusync Mapping", "Medusync Settings", "Medusync Site"}
+		configured = set(hooks.doc_events) - ours
 		self.assertEqual(configured, set(), f"hooks.py still hardcodes: {sorted(configured)}")
 
 	def test_a_configured_pack_supplies_its_outbound_hooks(self):

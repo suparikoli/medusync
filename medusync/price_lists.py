@@ -1,22 +1,19 @@
 # Copyright (c) 2026, Mithtech Innovative Solutions PVT LTD and contributors
 # For license information, please see license.txt
 
-"""Which price list travels where, and as what.
+"""Which price list travels where.
 
 Prices sync in both directions by default, but the direction is settable
 independently for each Price List: a retail list can flow ERPNext to
-Medusa, a wholesale list can feed B2B tier prices, and a cost list must
-never leave the building. A single global "selling price list" setting
-could express none of that.
+Medusa while a cost list never leaves the building. A single global
+"selling price list" setting could express neither.
 
-Each rule also carries a *role*, because the same list means different
-things to different stores: a base variant price at one, a customer-tier
-price at another. That is why the map is per store rather than per site.
+The map is per store, because two stores can sell from different lists.
+Customer-specific prices are not expressed here: they belong to Medusa
+customer groups and price lists.
 
-What came before still works. A store with no rows falls back to the
-Settings selling list as its base price and to the `medusa_customer_tier`
-Custom Field on Price List for its tiers — the arrangement every existing
-installation is running today.
+A store with no rows falls back to the Settings selling list, the
+arrangement every existing installation is running today.
 """
 
 import frappe
@@ -32,11 +29,7 @@ _CACHE_KEY = "medusync_price_list_map"
 #: exactly as it did before the map existed.
 DEFAULT_SELLING_PRICE_LIST = "Standard Selling"
 
-#: The tier code used to live in a Custom Field on Price List.
-LEGACY_TIER_FIELD = "medusa_customer_tier"
-
 ROLE_BASE = "Base Price"
-ROLE_TIER = "Tier Price"
 
 #: Directions whose data may leave this site. "From Medusa" and
 #: "Don't Sync" both mean nothing goes out; they differ only in whether
@@ -57,7 +50,7 @@ def _rows() -> list[dict]:
 			for row in frappe.get_all(
 				CHILD_DOCTYPE,
 				filters={"parenttype": sites.SITE_DOCTYPE, "parentfield": PARENTFIELD},
-				fields=["parent", "price_list", "direction", "role", "tier_code", "enabled"],
+				fields=["parent", "price_list", "direction", "enabled"],
 			)
 		]
 	except Exception:
@@ -71,23 +64,6 @@ def legacy_selling_price_list() -> str:
 	except Exception:
 		configured = ""
 	return configured or DEFAULT_SELLING_PRICE_LIST
-
-
-def legacy_tiers() -> dict:
-	"""price list -> tier code, from the Custom Field on Price List."""
-	try:
-		return {
-			row["name"]: row[LEGACY_TIER_FIELD]
-			for row in frappe.get_all(
-				"Price List",
-				filters={LEGACY_TIER_FIELD: ["is", "set"]},
-				fields=["name", LEGACY_TIER_FIELD],
-			)
-			if row.get(LEGACY_TIER_FIELD)
-		}
-	except Exception:
-		# The Custom Field is not installed on this site.
-		return {}
 
 
 def _table() -> dict:
@@ -114,15 +90,13 @@ def _table() -> dict:
 				"site_id": site_id,
 				"price_list": row["price_list"],
 				"direction": row.get("direction") or "To Medusa",
-				"role": row.get("role") or ROLE_BASE,
-				"tier_code": (row.get("tier_code") or "").strip() or None,
+				"role": ROLE_BASE,
 			}
 		)
 
 	unmapped = sorted(set(stores.values()) - configured)
 	if unmapped:
 		base = legacy_selling_price_list()
-		tiers = legacy_tiers()
 		for site_id in unmapped:
 			if base:
 				table.setdefault(base, []).append(
@@ -131,21 +105,6 @@ def _table() -> dict:
 						"price_list": base,
 						"direction": "To Medusa",
 						"role": ROLE_BASE,
-						"tier_code": None,
-					}
-				)
-			for price_list, tier_code in tiers.items():
-				# The selling list is already the base price; it cannot
-				# also be a tier for the same store.
-				if price_list == base:
-					continue
-				table.setdefault(price_list, []).append(
-					{
-						"site_id": site_id,
-						"price_list": price_list,
-						"direction": "To Medusa",
-						"role": ROLE_TIER,
-						"tier_code": tier_code,
 					}
 				)
 

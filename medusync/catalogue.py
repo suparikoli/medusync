@@ -37,8 +37,6 @@ import frappe
 DEFAULT_CATALOGUE_DOCTYPE = "Item"
 ALLOW_FIELD = "allow_medusa_catalogue_updates"
 
-#: Cleared when Medusa says the product is gone.
-LINK_FIELDS = ("medusa_product_id", "medusa_variant_id")
 
 #: Event suffixes that mean "this no longer exists over there".
 DELETE_SUFFIXES = (".deleted", ".removed", ".destroyed")
@@ -95,7 +93,9 @@ def find(doctype: str, key_field: str, key_value) -> str | None:
 	try:
 		if not key_field or key_field == "name":
 			return key_value if frappe.db.exists(doctype, key_value) else None
-		return frappe.db.get_value(doctype, {key_field: key_value}, "name")
+		from medusync import links
+
+		return links.find_by_key(doctype, key_field, key_value)
 	except Exception:
 		# An unknown key field is not a reason to let a write through.
 		return None
@@ -133,8 +133,7 @@ def unlink(doctype: str, name: str) -> None:
 	invoiced or counted, so a storefront delete would quietly stop the
 	warehouse working.
 	"""
-	meta = frappe.get_meta(doctype)
-	updates = {field: None for field in LINK_FIELDS if meta.has_field(field)}
-	if not updates:
-		return
-	frappe.db.set_value(doctype, name, updates, update_modified=False)
+	from medusync import links
+
+	links.forget(doctype, name, entity="product")
+	links.forget(doctype, name, entity="variant")

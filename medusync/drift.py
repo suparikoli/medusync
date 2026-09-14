@@ -18,7 +18,7 @@ again.
 
 import frappe
 
-from medusync import config
+from medusync import config, links
 from medusync.attention import FIELD_MISSING, clear, flag, notify_attention
 
 #: Always addressable, whatever the DocType's own field list says.
@@ -34,7 +34,15 @@ def _missing_fields(doctype: str, field_map) -> list[str]:
 	if not frappe.db.exists("DocType", doctype):
 		return ["(the DocType %s does not exist on this site)" % doctype]
 	valid = {df.fieldname for df in frappe.get_meta(doctype).fields} | ALWAYS_VALID
-	return [row.frappe_field for row in (field_map or []) if row.frappe_field not in valid]
+	return [
+		row.frappe_field
+		for row in (field_map or [])
+		# A link key is not a column and never was: `medusa_order_id` and the
+		# rest are resolved through Medusync Link. Counting them as missing
+		# would switch off every mapping that carries one, on every sweep,
+		# for a field that is working exactly as designed.
+		if row.frappe_field not in valid and not links.is_link_key(row.frappe_field)
+	]
 
 
 def check() -> dict:

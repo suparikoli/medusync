@@ -22,6 +22,17 @@
   "behaviour_section",
   "handler_pack",
   "column_break_behaviour",
+  "orders_section",
+  "order_document",
+  "submit_documents",
+  "record_payments",
+  "mode_of_payment",
+  "column_break_orders",
+  "invoice_numbering",
+  "erpnext_invoice_series",
+  "store_invoice_prefix",
+  "send_invoice_to_store",
+  "invoice_print_format",
   "mapping_section",
   "warehouses",
   "price_lists",
@@ -167,7 +178,7 @@
    "fieldname": "mapping_section",
    "fieldtype": "Section Break",
    "label": "What This Store Draws On",
-   "description": "Stock and prices are per store. Two stores can draw on the same warehouse under different stock-location ids, and the same price list can be the shelf price at one store and a B2B tier at another. Leave both empty to keep the single warehouse and single selling price list named in Medusync Settings."
+   "description": "Stock and prices are per store. Two stores can draw on the same warehouse under different stock-location ids. Leave both empty to keep the single warehouse and single selling price list named in Medusync Settings."
   },
   {
    "fieldname": "warehouses",
@@ -181,7 +192,7 @@
    "fieldtype": "Table",
    "label": "Price Lists",
    "options": "Medusync Price List Map",
-   "description": "Price lists this store sees, which way each one travels, and whether it is a base price or a customer tier."
+   "description": "Price lists this store sees and which way each one travels. Customer-specific prices belong to Medusa customer groups and price lists."
   },
   {
    "default": "0",
@@ -205,10 +216,92 @@
    "fieldtype": "Int",
    "label": "Stop Trying After",
    "description": "Consecutive failures before this store is left alone. Ten is about a deploy's worth of downtime at the retry backoff, so a rolling restart does not trip it and a real outage does."
+  },
+  {
+   "fieldname": "orders_section",
+   "fieldtype": "Section Break",
+   "label": "Orders and Invoices",
+   "description": "What a store order becomes here, who numbers its invoice, and whether the customer can download it from the store."
+  },
+  {
+   "default": "Sales Order",
+   "fieldname": "order_document",
+   "fieldtype": "Select",
+   "label": "A Store Order Becomes",
+   "options": "Sales Order\nSales Invoice\nSales Order and Sales Invoice",
+   "description": "Sales Invoice skips the order entirely and bills straight from what the store sent: lines, taxes, shipping and payment."
+  },
+  {
+   "default": "0",
+   "fieldname": "submit_documents",
+   "fieldtype": "Check",
+   "label": "Submit What Arrives",
+   "description": "Leave unticked to receive drafts and submit them after review."
+  },
+  {
+   "default": "0",
+   "fieldname": "record_payments",
+   "fieldtype": "Check",
+   "label": "Record Store Payments",
+   "description": "Book a Payment Entry for money the store captured, against the invoice (or as an advance on the order)."
+  },
+  {
+   "depends_on": "record_payments",
+   "fieldname": "mode_of_payment",
+   "fieldtype": "Link",
+   "label": "Mode of Payment",
+   "options": "Mode of Payment",
+   "mandatory_depends_on": "record_payments",
+   "description": "Its default account for the company receives the money."
+  },
+  {
+   "fieldname": "column_break_orders",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "ERPNext numbers the invoice (company series)",
+   "fieldname": "invoice_numbering",
+   "fieldtype": "Select",
+   "label": "Invoice Numbering",
+   "options": "ERPNext numbers the invoice (company series)\nERPNext numbers the invoice (separate store series)\nThe store numbers the invoice",
+   "description": "Company series: invoices share the company's own Sales Invoice series. Separate store series: ERPNext still numbers them, but under a series of their own. Either way ERPNext generates the invoice and pushes the PDF to the store. The store numbers the invoice: the store owns the series, ERPNext books what it sends and pushes nothing back."
+  },
+  {
+   "fieldname": "erpnext_invoice_series",
+   "fieldtype": "Data",
+   "label": "Separate Invoice Series",
+   "depends_on": "eval:doc.invoice_numbering=='ERPNext numbers the invoice (separate store series)'",
+   "mandatory_depends_on": "eval:doc.invoice_numbering=='ERPNext numbers the invoice (separate store series)'",
+   "description": "The naming series ERPNext gives this store's invoices, e.g. SPLENDX-INV-.YYYY.-  Added to the Sales Invoice series list if it is not there yet."
+  },
+  {
+   "depends_on": "eval:doc.invoice_numbering=='The store numbers the invoice'",
+   "mandatory_depends_on": "eval:doc.invoice_numbering=='The store numbers the invoice'",
+   "fieldname": "store_invoice_prefix",
+   "fieldtype": "Data",
+   "label": "Store Invoice Prefix",
+   "description": "The store numbers its invoices as this prefix and a running number, e.g. STR-00042. Change it to suit the store. Must not collide with an ERPNext naming series; ERPNext will refuse to create an invoice under it.",
+   "default": "STR-"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:['ERPNext numbers the invoice (company series)','ERPNext numbers the invoice (separate store series)'].includes(doc.invoice_numbering)",
+   "fieldname": "send_invoice_to_store",
+   "fieldtype": "Check",
+   "label": "Send Invoice PDF to the Store",
+   "description": "On submit, the store fetches the PDF and keeps it privately; only the customer who placed the order can download it. Never sent when the store numbers its own invoices."
+  },
+  {
+   "depends_on": "eval:(['ERPNext numbers the invoice (company series)','ERPNext numbers the invoice (separate store series)'].includes(doc.invoice_numbering)) && doc.send_invoice_to_store",
+   "fieldname": "invoice_print_format",
+   "fieldtype": "Link",
+   "label": "Invoice Print Format",
+   "options": "Print Format",
+   "description": "Blank uses the Sales Invoice default."
   }
  ],
  "links": [],
- "modified": "2026-09-04 00:00:00.000000",
+ "modified": "2026-09-13 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Medusync",
  "name": "Medusync Site",

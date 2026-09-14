@@ -47,19 +47,25 @@ class TestCatalogueDoctype(IntegrationTestCase):
 	def test_it_defaults_to_item(self):
 		self.assertEqual(self._before or "Item", "Item")
 
-	def test_the_catalogue_is_always_under_selection(self):
-		# Whatever else an operator lists, the catalogue itself must carry
-		# the selector — it is the doctype the whole feature exists for.
+	def test_the_catalogue_is_under_selection_only_when_listed(self):
+		# It used to carry the selector on its own, which is how an Item
+		# form grew fields nobody asked for. Now listing it is the request.
+		settings = frappe.get_single("Medusync Settings")
+		settings.set("selection_doctypes", [])
+		settings.flags.ignore_permissions = True
+		settings.save(ignore_permissions=True)
+		frappe.clear_cache(doctype="Medusync Settings")
+		self.assertNotIn("Item", selection.selection_doctypes())
+		settings.append("selection_doctypes", {"document_type": "Item", "enabled": 1})
+		settings.save(ignore_permissions=True)
+		frappe.clear_cache(doctype="Medusync Settings")
 		self.assertIn("Item", selection.selection_doctypes())
 
-	def test_changing_it_puts_the_selector_on_the_new_doctype(self):
+	def test_changing_the_catalogue_doctype_adds_no_field(self):
 		frappe.db.set_single_value("Medusync Settings", "products_doctype", "Customer")
 		frappe.clear_cache(doctype="Medusync Settings")
-		selection.ensure_selector_fields()
-		self.assertTrue(
-			frappe.db.exists("Custom Field", {"dt": "Customer", "fieldname": "medusync_sync"})
-		)
-		self.assertIn("Customer", selection.selection_doctypes())
+		self.assertNotIn("Customer", selection.selection_doctypes())
+		self.assertFalse(frappe.db.exists("Custom Field", {"dt": "Customer", "fieldname": ["like", "medusync_%"]}))
 
 	def test_changing_it_tells_every_site(self):
 		announced = []

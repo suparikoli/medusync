@@ -4,14 +4,14 @@
 
 import frappe
 
-from medusync import config
+from medusync import config, invoicing, links
 from medusync.outbound import emit
 
 
 def _order_id_from_so(so_name):
     if not so_name:
         return None
-    return frappe.db.get_value("Sales Order", so_name, "medusa_order_id")
+    return links.medusa_id_for("Sales Order", so_name, entity="order")
 
 
 def _deliver(event, medusa_order_id, payload, ref, doctype, docname):
@@ -113,14 +113,19 @@ def on_sales_invoice(doc, method=None):
         if not _guard():
             return
         oid = None
-        for it in (doc.items or []):
+        for it in (doc.get("items") or []):
             if it.get("sales_order"):
-                oid = _order_id_from_so(it.sales_order)
+                oid = _order_id_from_so(it.get("sales_order"))
                 if oid:
                     break
-        if not oid and doc.get("medusa_order_id"):
-            oid = doc.get("medusa_order_id")
         if not oid:
+            oid = links.value_for(doc, "medusa_order_id")
+        if not oid:
+            return
+        opts = invoicing.options()
+        if invoicing.store_numbered(opts):
+            # The store issued this invoice under its own number; it
+            # already has it, and a copy back would be a second invoice.
             return
         cancelled = method == "on_cancel" or getattr(doc, "docstatus", 0) == 2
         if doc.get("is_return"):
@@ -143,6 +148,15 @@ def on_sales_invoice(doc, method=None):
             "currency": doc.get("currency"),
             "status": status,
         }
+        if opts.send_invoice_to_store and not cancelled:
+            # The store pulls the PDF with its API credentials and keeps it
+            # privately; a PDF inside the webhook would be a copy of a
+            # customer document in every log row on both sides.
+            payload["pdf"] = {
+                "doctype": "Sales Invoice",
+                "name": doc.name,
+                "print_format": opts.invoice_print_format or None,
+            }
         _deliver("order.invoiced", oid, payload, "%s-%s" % (doc.name, method), "Sales Invoice", doc.name)
     except Exception:
         frappe.log_error(title="medusync reverse SI hook failed", message=frappe.get_traceback())

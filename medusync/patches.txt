@@ -4,13 +4,8 @@
 medusync.patches.v1_1.drop_scratch_custom_fields
 
 [post_model_sync]
-# v1_0 installed Medusa reference fields on doctypes that a client
-# app owned. Both the patch and those doctypes are gone; the file was
-# never listed here.
-medusync.patches.v1_1.install_reference_fields
 medusync.patches.v1_2.create_default_site
 medusync.patches.v1_2.backfill_mapping_identity
-medusync.patches.v1_3.install_sync_selection
-medusync.patches.v1_4.install_order_source_field
 medusync.patches.v1_5.rename_handler_packs
 medusync.patches.v1_6.pair_identity
+medusync.patches.v1_7.move_reference_fields_to_links

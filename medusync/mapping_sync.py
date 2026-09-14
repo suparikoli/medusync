@@ -184,6 +184,11 @@ def to_canonical(doc) -> dict:
 		"key_erpnext_field": doc.key_field or "name",
 		"source_of_truth": doc.get("source_of_truth") or "ERPNext",
 		"site_id": doc.get("site") or None,
+		# The names the store must listen for. Derived here because only
+		# this side knows which doc events the mapping fires on, and
+		# without them the store matches nothing: an arriving event finds
+		# no mapping, answers 200, and quietly does nothing at all.
+		"events": [doc.resolved_event_name(ev) for ev in doc.docevent_list()],
 		"fields": [_canonical_field(row) for row in (doc.field_map or [])],
 		# Why it is off, when it is off and somebody here said why. The
 		# other side shows it rather than a switch that went off by itself.

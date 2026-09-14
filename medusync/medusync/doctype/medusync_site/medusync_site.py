@@ -15,6 +15,25 @@ class MedusyncSite(Document):
 		self.normalise_url()
 		self.clamp_numbers()
 		self.reject_duplicate_rows()
+		self.require_invoice_choices()
+
+	def require_invoice_choices(self):
+		"""The two choices that cannot run half-filled.
+
+		Frappe shows these as mandatory in the form but does not enforce a
+		conditional requirement on a server-side save, and a store that
+		numbers invoices with no prefix would issue numbers that collide.
+		"""
+		if self.invoice_numbering == "The store numbers the invoice" and not (self.store_invoice_prefix or "").strip():
+			frappe.throw(
+				frappe._("Give the store an invoice prefix, or let ERPNext number the invoices."),
+				frappe.MandatoryError,
+			)
+		if self.record_payments and not self.mode_of_payment:
+			frappe.throw(
+				frappe._("Pick the Mode of Payment store payments are booked under."),
+				frappe.MandatoryError,
+			)
 
 	def reject_duplicate_rows(self):
 		"""One warehouse, one rule; one price list, one rule.
@@ -26,26 +45,6 @@ class MedusyncSite(Document):
 		"""
 		self._reject_duplicates("warehouses", "warehouse", "Warehouse")
 		self._reject_duplicates("price_lists", "price_list", "Price List")
-		self.require_tier_codes()
-
-	def require_tier_codes(self):
-		"""A Tier Price needs a tier to be.
-
-		Without the code the far side has nothing to apply the price to, and
-		the mistake would surface as a quiet stream of skipped events rather
-		than as the configuration error it is. Checked here rather than on
-		the child row because Frappe does not run a child doctype's
-		`validate` when the parent is saved.
-		"""
-		for row in self.get("price_lists") or []:
-			if row.role == "Tier Price" and not (row.tier_code or "").strip():
-				frappe.throw(
-					frappe._(
-						"Give the tier price on {0} a Medusa tier code, or set its role to Base Price."
-					).format(frappe.bold(row.price_list or "this row"))
-				)
-			if row.role != "Tier Price":
-				row.tier_code = None
 
 	def _reject_duplicates(self, fieldname, key, label):
 		seen = set()

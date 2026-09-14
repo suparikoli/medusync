@@ -3,33 +3,6 @@
 
 import frappe
 
-#: The patches that install schema rather than migrate data. Every one is
-#: idempotent — `create_custom_fields(update=True)` behind a
-#: `frappe.db.exists` guard — so running them at install and again on the
-#: next migrate changes nothing the second time.
-SCHEMA_PATCHES = (
-	"medusync.patches.v1_1.install_reference_fields",
-	"medusync.patches.v1_3.install_sync_selection",
-	"medusync.patches.v1_4.install_order_source_field",
-)
-
-
-def install_schema():
-	"""Create the custom fields the connector reads and writes.
-
-	`frappe.installer.install_app` calls `set_all_patches_as_completed`
-	before it calls `after_install`, so on a fresh site every patch is
-	marked done without ever running. That is right for a patch that
-	migrates data a new site does not have, and wrong for ours: these
-	create `Customer.medusa_customer_id`, the Sales Order payment and
-	channel fields, and the per-document sync selector. Without this a
-	fresh install looks healthy and fails on the first push, on a field
-	that was never created.
-	"""
-	for path in SCHEMA_PATCHES:
-		frappe.get_attr(path + ".execute")()
-
-
 def after_install():
 	"""Create the Single with safe defaults, switched OFF.
 
@@ -57,8 +30,8 @@ def after_install():
 	settings.save()
 	frappe.db.commit()
 
-	install_schema()
-	frappe.db.commit()
+	# Deliberately no fields on any doctype: Medusa ids live in Medusync
+	# Link and the sync decision in Medusync Exclusion / Inclusion.
 
 
 def after_migrate():
@@ -69,7 +42,12 @@ def after_migrate():
 	over. A site that will not migrate because one mapping went stale is a
 	site nobody upgrades.
 	"""
-	from medusync import defaults, drift
+	from medusync import defaults, drift, sync_field
+
+	try:
+		sync_field.sync_fields()
+	except Exception:
+		frappe.log_error(title="medusync could not place the sync tick", message=frappe.get_traceback())
 
 	try:
 		if defaults.installed_version() < defaults.DEFAULTS_VERSION:

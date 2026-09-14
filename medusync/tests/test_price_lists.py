@@ -4,9 +4,8 @@
 """Each price list travels in its own direction.
 
 Prices are bidirectional by default, but the direction is configurable
-independently for each Price List. Retail might flow ERPNext to Medusa, a
-wholesale list might feed B2B tiers, and a cost list must never leave the
-building at all. One global "selling price list" setting could express
+independently for each Price List. Retail might flow ERPNext to Medusa
+while a cost list never leaves the building at all. One global "selling price list" setting could express
 none of that.
 
 The map is per store, because two stores can price the same catalogue
@@ -114,7 +113,7 @@ class PriceListCase(IntegrationTestCase):
 
 class TestTheRules(PriceListCase):
 	def test_a_base_price_list_reaches_its_store(self):
-		self._site("pl-a", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}])
+		self._site("pl-a", [{"price_list": self.pl_a, "direction": "To Medusa"}])
 		self._disable_others()
 		rules = price_lists.rules_for(self.pl_a)
 		self.assertEqual(len(rules), 1)
@@ -122,86 +121,42 @@ class TestTheRules(PriceListCase):
 		self.assertEqual(rules[0]["role"], "Base Price")
 
 	def test_dont_sync_stops_a_list_leaving(self):
-		self._site("pl-b", [{"price_list": self.pl_a, "direction": "Don't Sync", "role": "Base Price"}])
+		self._site("pl-b", [{"price_list": self.pl_a, "direction": "Don't Sync"}])
 		self._disable_others()
 		self.assertEqual(price_lists.rules_for(self.pl_a), [])
 
 	def test_a_list_medusa_owns_does_not_travel_outbound(self):
-		self._site("pl-c", [{"price_list": self.pl_a, "direction": "From Medusa", "role": "Base Price"}])
+		self._site("pl-c", [{"price_list": self.pl_a, "direction": "From Medusa"}])
 		self._disable_others()
 		self.assertEqual(price_lists.rules_for(self.pl_a), [])
 
 	def test_two_way_counts_as_outbound(self):
-		self._site("pl-d", [{"price_list": self.pl_a, "direction": "Two-way", "role": "Base Price"}])
+		self._site("pl-d", [{"price_list": self.pl_a, "direction": "Two-way"}])
 		self._disable_others()
 		self.assertEqual(len(price_lists.rules_for(self.pl_a)), 1)
 
-	def test_a_tier_list_carries_its_code(self):
-		self._site(
-			"pl-e",
-			[
-				{
-					"price_list": self.pl_a,
-					"direction": "To Medusa",
-					"role": "Tier Price",
-					"tier_code": "local_mbo",
-				}
-			],
-		)
-		self._disable_others()
-		rule = price_lists.rules_for(self.pl_a)[0]
-		self.assertEqual(rule["role"], "Tier Price")
-		self.assertEqual(rule["tier_code"], "local_mbo")
-
 	def test_a_list_nobody_mapped_goes_nowhere(self):
-		self._site("pl-f", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}])
+		self._site("pl-f", [{"price_list": self.pl_a, "direction": "To Medusa"}])
 		self._disable_others()
 		self.assertEqual(price_lists.rules_for(self.pl_b), [])
-
-	def test_the_same_list_can_be_a_base_price_here_and_a_tier_there(self):
-		self._site("pl-g", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}])
-		self._site(
-			"pl-h",
-			[
-				{
-					"price_list": self.pl_a,
-					"direction": "To Medusa",
-					"role": "Tier Price",
-					"tier_code": "wholesale",
-				}
-			],
-		)
-		self._disable_others()
-		by_site = {r["site_id"]: r["role"] for r in price_lists.rules_for(self.pl_a)}
-		self.assertEqual(by_site, {"pl-g": "Base Price", "pl-h": "Tier Price"})
 
 	def test_the_same_list_listed_twice_for_one_store_is_refused(self):
 		# Two rules for one list at one store is not a conflict the code can
 		# see; the second simply wins, and the store starts pricing from a
 		# rule nobody chose.
 		site = self._site(
-			"pl-dupe", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}]
+			"pl-dupe", [{"price_list": self.pl_a, "direction": "To Medusa"}]
 		)
 		site.append(
 			"price_lists",
-			{"price_list": self.pl_a, "direction": "To Medusa", "role": "Tier Price", "tier_code": "t"},
+			{"price_list": self.pl_a, "direction": "Two-way"},
 		)
 		with self.assertRaises(frappe.ValidationError):
 			site.save(ignore_permissions=True)
 
-	def test_a_tier_row_without_a_code_is_refused(self):
-		# It could never be applied at the far end, and the failure would
-		# arrive as a stream of skipped events rather than as the
-		# configuration mistake it is.
-		with self.assertRaises(frappe.ValidationError):
-			self._site(
-				"pl-notier",
-				[{"price_list": self.pl_a, "direction": "To Medusa", "role": "Tier Price"}],
-			)
-
 	def test_a_disabled_row_is_ignored(self):
 		site = self._site(
-			"pl-i", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}]
+			"pl-i", [{"price_list": self.pl_a, "direction": "To Medusa"}]
 		)
 		site.price_lists[0].enabled = 0
 		site.save(ignore_permissions=True)
@@ -211,8 +166,7 @@ class TestTheRules(PriceListCase):
 
 
 class TestTheFallback(PriceListCase):
-	"""Before the map, one global setting named the selling list and a
-	Custom Field on Price List named the tier. Both still work."""
+	"""Before the map, one global setting named the selling list. It still works."""
 
 	def setUp(self):
 		super().setUp()
@@ -236,33 +190,9 @@ class TestTheFallback(PriceListCase):
 		rules = price_lists.rules_for(self.pl_a)
 		self.assertEqual([(r["site_id"], r["role"]) for r in rules], [("pl-legacy", "Base Price")])
 
-	def test_a_tier_code_on_the_price_list_is_still_honoured(self):
-		self._site("pl-legacy2")
-		self._disable_others()
-		# Pin the base price to the OTHER list, so this one can only be
-		# reached as a tier. Left to whatever the site has configured, the
-		# two could be the same list and the assertion would follow the
-		# data rather than the code.
-		self._legacy(self.pl_a)
-		frappe.db.set_value(
-			"Price List", self.pl_b, "medusa_customer_tier", "legacy_tier", update_modified=False
-		)
-		price_lists.clear_cache()
-		try:
-			rules = price_lists.rules_for(self.pl_b)
-			self.assertEqual(len(rules), 1)
-			self.assertEqual(rules[0]["role"], "Tier Price")
-			self.assertEqual(rules[0]["tier_code"], "legacy_tier")
-		finally:
-			frappe.db.set_value(
-				"Price List", self.pl_b, "medusa_customer_tier", None, update_modified=False
-			)
-			price_lists.clear_cache()
-
-
 class TestThePush(PriceListCase):
 	def test_a_base_list_sends_the_variant_price(self):
-		self._site("pl-push", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}])
+		self._site("pl-push", [{"price_list": self.pl_a, "direction": "To Medusa"}])
 		self._disable_others()
 		from medusync.handlers.commerce import pricing
 
@@ -271,33 +201,9 @@ class TestThePush(PriceListCase):
 		self.assertEqual([a[1] for a, _ in sent], ["variant.price.set"])
 		self.assertEqual(sent[0][0][3]["amount"], 799)
 
-	def test_a_tier_list_sends_a_tier_price_with_its_bracket(self):
-		self._site(
-			"pl-push2",
-			[
-				{
-					"price_list": self.pl_a,
-					"direction": "To Medusa",
-					"role": "Tier Price",
-					"tier_code": "local_mbo",
-				}
-			],
-		)
-		self._disable_others()
-		from medusync.handlers.commerce import pricing
-
-		with self._capture() as sent:
-			pricing.on_item_price(
-				self._item_price(self.pl_a, rate=640, packing_unit=50), method="on_update"
-			)
-		self.assertEqual([a[1] for a, _ in sent], ["variant.tier_price.set"])
-		payload = sent[0][0][3]
-		self.assertEqual(payload["tier_code"], "local_mbo")
-		self.assertEqual(payload["min_quantity"], 50)
-
 	def test_a_dont_sync_list_sends_nothing(self):
 		self._site(
-			"pl-push3", [{"price_list": self.pl_a, "direction": "Don't Sync", "role": "Base Price"}]
+			"pl-push3", [{"price_list": self.pl_a, "direction": "Don't Sync"}]
 		)
 		self._disable_others()
 		from medusync.handlers.commerce import pricing
@@ -307,15 +213,21 @@ class TestThePush(PriceListCase):
 		self.assertEqual(sent, [])
 
 	def test_each_store_gets_only_the_rule_it_asked_for(self):
-		self._site("pl-x", [{"price_list": self.pl_a, "direction": "To Medusa", "role": "Base Price"}])
-		self._site(
-			"pl-y",
-			[{"price_list": self.pl_a, "direction": "To Medusa", "role": "Tier Price", "tier_code": "t2"}],
-		)
+		self._site("pl-x", [{"price_list": self.pl_a, "direction": "To Medusa"}])
+		self._site("pl-y", [{"price_list": self.pl_a, "direction": "Don't Sync"}])
 		self._disable_others()
 		from medusync.handlers.commerce import pricing
 
 		with self._capture() as sent:
 			pricing.on_item_price(self._item_price(self.pl_a), method="on_update")
 		by_site = {k["site_id"]: a[1] for a, k in sent}
-		self.assertEqual(by_site, {"pl-x": "variant.price.set", "pl-y": "variant.tier_price.set"})
+		self.assertEqual(by_site, {"pl-x": "variant.price.set"})
+
+	def test_no_price_is_ever_sent_as_a_customer_tier(self):
+		self._site("pl-z", [{"price_list": self.pl_a, "direction": "To Medusa"}])
+		self._disable_others()
+		from medusync.handlers.commerce import pricing
+
+		with self._capture() as sent:
+			pricing.on_item_price(self._item_price(self.pl_a, packing_unit=50), method="on_update")
+		self.assertNotIn("variant.tier_price.set", [a[1] for a, _ in sent])

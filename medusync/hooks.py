@@ -21,6 +21,8 @@ after_install = "medusync.install.after_install"
 # down after an upgrade does not upgrade again.
 after_migrate = "medusync.install.after_migrate"
 
+boot_session = "medusync.selection.boot_session"
+
 # ── Document events ──────────────────────────────────────────────────
 # One wildcard binding, and no business doctype named anywhere in this
 # file. Two runtime questions decide what actually happens on a save:
@@ -34,8 +36,17 @@ after_migrate = "medusync.install.after_migrate"
 # unrelated save is a dict miss.
 doc_events = {
 	"*": {
+		# A store that numbers its own invoices owns that series outright;
+		# ERPNext must not raise one under the same prefix behind its back.
+		# Kept under "*" because hooks.py names no business doctype.
+		"before_insert": "medusync.invoicing.guard_store_series",
+		# The sync tick is a mirror of Medusync Inclusion: shown from it on
+		# load, written back to it on save. Under "*" because hooks.py names
+		# no business doctype, and both calls leave immediately unless the
+		# doctype actually carries the field.
+		"onload": "medusync.sync_field.read_into",
+		"on_update": ["medusync.outbound.on_doc_event", "medusync.sync_field.write_from"],
 		"after_insert": "medusync.outbound.on_doc_event",
-		"on_update": "medusync.outbound.on_doc_event",
 		"on_submit": "medusync.outbound.on_doc_event",
 		"on_cancel": "medusync.outbound.on_doc_event",
 		"on_trash": "medusync.outbound.on_doc_event",
@@ -49,17 +60,23 @@ doc_events = {
 	},
 	# A site carries the warehouse and price-list maps, so saving one
 	# invalidates three hot-path caches, not one.
+	"Medusync Settings": {
+		"on_update": "medusync.sync_field.sync_fields",
+	},
 	"Medusync Site": {
 		"on_update": [
 			"medusync.sites.clear_cache",
 			"medusync.warehouses.clear_cache",
 			"medusync.price_lists.clear_cache",
+			"medusync.invoicing.clear_cache",
 			"medusync.mapping_sync.on_site_update",
+			"medusync.invoicing.announce",
 		],
 		"on_trash": [
 			"medusync.sites.clear_cache",
 			"medusync.warehouses.clear_cache",
 			"medusync.price_lists.clear_cache",
+			"medusync.invoicing.clear_cache",
 		],
 	},
 }

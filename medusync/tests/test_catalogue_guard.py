@@ -25,7 +25,7 @@ try:
 except ImportError:  # pragma: no cover - older frappe
 	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
-from medusync import catalogue
+from medusync import catalogue, links, sites
 
 ALLOW_FIELD = "allow_medusa_catalogue_updates"
 
@@ -38,15 +38,23 @@ class CatalogueCase(IntegrationTestCase):
 			self.skipTest("no Item on this site")
 		self.item = rows[0].name
 		self._allow_before = frappe.db.get_single_value("Medusync Settings", ALLOW_FIELD)
-		self._link_before = frappe.db.get_value("Item", self.item, "medusa_product_id")
+		default = sites.default_site()
+		if not default:
+			self.skipTest("no Medusync Site to link through")
+		frappe.flags.medusync_site_id = default["site_id"]
+		self._link_before = links.medusa_id_for("Item", self.item, entity="product")
 		self._set_allow(0)
 
 	def tearDown(self):
 		self._set_allow(self._allow_before or 0)
-		frappe.db.set_value(
-			"Item", self.item, "medusa_product_id", self._link_before, update_modified=False
-		)
+		links.forget("Item", self.item, entity="product")
+		if self._link_before:
+			links.remember("Item", self.item, self._link_before, entity="product")
+		frappe.flags.medusync_site_id = None
 		super().tearDown()
+
+	def _link(self, product_id):
+		links.remember("Item", self.item, product_id, entity="product")
 
 	def _set_allow(self, value):
 		frappe.db.set_single_value("Medusync Settings", ALLOW_FIELD, value)
@@ -76,9 +84,7 @@ class TestUpdatesAreRefusedByDefault(CatalogueCase):
 		self.assertFalse(verdict.blocked)
 
 	def test_it_looks_the_record_up_by_the_key_it_was_given(self):
-		frappe.db.set_value(
-			"Item", self.item, "medusa_product_id", "prod_guard_1", update_modified=False
-		)
+		self._link("prod_guard_1")
 		verdict = catalogue.guard("Item", "medusa_product_id", "prod_guard_1", "product.updated")
 		self.assertTrue(verdict.blocked)
 
@@ -88,16 +94,14 @@ class TestDeletionNeverDestroys(CatalogueCase):
 		# Whether the borrowed Item happens to be enabled is none of this
 		# test's business. That the guard left it exactly as it found it is.
 		was_disabled = frappe.db.get_value("Item", self.item, "disabled")
-		frappe.db.set_value(
-			"Item", self.item, "medusa_product_id", "prod_guard_2", update_modified=False
-		)
+		self._link("prod_guard_2")
 		verdict = catalogue.guard("Item", "medusa_product_id", "prod_guard_2", "product.deleted")
 		self.assertTrue(verdict.blocked)
 		self.assertEqual(verdict.reason, "catalogue-unlinked")
 		# the Item is still here, untouched, and simply no longer claimed
 		self.assertTrue(frappe.db.exists("Item", self.item))
 		self.assertEqual(frappe.db.get_value("Item", self.item, "disabled"), was_disabled)
-		self.assertFalse(frappe.db.get_value("Item", self.item, "medusa_product_id"))
+		self.assertFalse(links.medusa_id_for("Item", self.item, entity="product"))
 
 	def test_deleting_something_that_was_never_linked_is_harmless(self):
 		verdict = catalogue.guard("Item", "medusa_product_id", "prod-never-existed", "product.deleted")
@@ -108,9 +112,7 @@ class TestDeletionNeverDestroys(CatalogueCase):
 		# "Medusa may update catalogue fields" is about fields. Nothing
 		# turns a storefront delete into an ERPNext delete.
 		self._set_allow(1)
-		frappe.db.set_value(
-			"Item", self.item, "medusa_product_id", "prod_guard_3", update_modified=False
-		)
+		self._link("prod_guard_3")
 		verdict = catalogue.guard("Item", "medusa_product_id", "prod_guard_3", "product.deleted")
 		self.assertTrue(verdict.blocked)
 		self.assertEqual(verdict.reason, "catalogue-unlinked")

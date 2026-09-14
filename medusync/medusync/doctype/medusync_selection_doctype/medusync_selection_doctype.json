@@ -6,7 +6,8 @@
  "engine": "InnoDB",
  "field_order": [
   "document_type",
-  "enabled"
+  "enabled",
+  "mode"
  ],
  "fields": [
   {
@@ -26,11 +27,20 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Enabled"
+  },
+  {
+   "default": "Every document unless excluded",
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Mode",
+   "options": "Every document unless excluded\nOnly chosen documents",
+   "description": "Unless excluded: everything syncs and you switch records off. Only chosen: nothing syncs until you pick it."
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-09-04 00:00:00.000000",
+ "modified": "2026-09-13 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Medusync",
  "name": "Medusync Selection DocType",

@@ -79,9 +79,6 @@ def on_doc_event(doc, method=None):
 
 		# Domain packs the site opted into. Nothing here names a doctype;
 		# the registry answers from what the configured packs declare.
-		# Keep the Don't Sync list in step with the document's own selector.
-		selection.on_doc_event(doc, method)
-
 		from medusync import handlers
 
 		handlers.run_outbound_hooks(doc, method)

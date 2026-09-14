@@ -92,6 +92,8 @@ def _receive(default_kind: str | None = None):
 	if default_kind and not body.get("kind"):
 		env.kind = default_kind
 	site_id = site["site_id"] if site else (env.origin_site_id or "default")
+	# Links made while handling this request belong to this store.
+	frappe.flags.medusync_site_id = site_id if frappe.db.exists(sites.SITE_DOCTYPE, site_id) else None
 
 	if not env.event:
 		return _respond(400, ok=False, status="bad_request", message="missing `event`")
