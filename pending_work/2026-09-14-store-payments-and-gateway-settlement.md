@@ -1,7 +1,7 @@
 # Store payments and gateway settlement
 
 Raised 14 September 2026. **Not started.** Payment recording is switched
-off on Medusync Site `splendx` (`record_payments = 0`, `mode_of_payment`
+off on the store's Medusync Site (`record_payments = 0`, `mode_of_payment`
 cleared) so orders and invoices can sync without it. Turning it back on
 before this is designed would post wrong numbers to real books.
 
@@ -68,16 +68,18 @@ commission and its GST where the accountant expects them.
 
 ## Prompt to start the work
 
-`pending_work/prompts/2026-09-14-gateway-settlement.prompt.md` — the same
-file exists in the plugin repo.
+A ready-to-paste session prompt lives outside both repos, with this
+deployment's paths, ports and site names in it — those are one machine's
+details and have no place in an app other stores install. On this machine:
+`frappe16/medusync-runbooks/2026-09-14-gateway-settlement.prompt.md`.
 
 ## Related
 
 - `medusync/invoicing.py` — `record_payments`, `_payment_entry`
 - `medusync/payment_modes.py` — reports missing modes and creates them on
   request; `missing()` also flags modes with no default account for a
-  company, which is how `Credit Card` and `UPI Payment` were found wanting
-  on SPLENDAX GLOBAL (UPI currently points at `Cash - SBPL`, a Cash
-  account, which is wrong for online receipts).
+  company. That check is what catches a mode pointing at a Cash account —
+  wrong for an online receipt, and only discovered as a misposted Payment
+  Entry otherwise.
 - Plugin: `src/modules/erpnext/registry.ts` fetches captured payments and
   `pushViaMapping` sends them as `medusa_payments`.

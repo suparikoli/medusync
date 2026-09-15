@@ -41,24 +41,25 @@ so this can be read next to the two forms:
 ## Notes / decisions needed
 
 1. **Handle** — Medusa needs a URL-safe slug and an Item Code is not one
-   (`ELE-CAB-ARM-COPPER-2.50 SQMM-3 CORE`). The plugin derives
-   `ele-cab-arm-copper-2-50-sqmm-3-core` and keeps the exact code as the
-   variant SKU. Nothing to decide unless you want a different slug rule.
+   (`BRKT-ASSY 12.5 MM/L (ZN)`). The plugin derives
+   `brkt-assy-12-5-mm-l-zn` and keeps the exact code as the variant SKU.
+   Nothing to decide unless you want a different slug rule.
 2. **Category** — Item Group currently lands in Metadata as text. Mapping it
    to real Medusa Categories means creating the category tree in Medusa and
    keeping it in step. Worth doing, own piece of work.
 3. **Brand → Subtitle** is a placeholder. Medusa has no Brand; the usual
    choices are a Product Type, a Collection, or a metadata key the storefront
-   reads. Currently 62,334 of 62,961 Items carry a Brand.
-4. **Price** — the site's selling price list is `Standard Selling`. The price
+   reads. Most Items carry a Brand.
+4. **Price** — comes from the store's chosen selling price list. The price
    lives on Item Price, not Item, so this needs its own pull. Medusa prices
    are per currency and per variant.
-5. **Is Sales Item** — every one of the 62,961 Items has it set, so it does
-   not narrow anything here. Kept as a filter for later.
-6. **Stock** — needs a source warehouse, deferred by request. SPLENDAX has
-   Stores / Finished Goods / Work In Progress / Goods In Transit.
-7. **No images exist** — 0 of 62,961 Items have one. Mapping Image is
-   pointless until pictures are loaded.
+5. **Is Sales Item** — set on every Item here, so it narrows nothing.
+   Kept as a filter for catalogues where it does.
+6. **Stock** — needs a source warehouse per store, deferred by request. A
+   company usually has several (stores, finished goods, work in progress,
+   goods in transit) and only one of them is what a shop should sell from.
+7. **Images** — none of the Items carry one, so mapping Image is pointless
+   until pictures are loaded.
 
 ## Not started
 

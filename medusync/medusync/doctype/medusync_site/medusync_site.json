@@ -272,7 +272,7 @@
    "label": "Separate Invoice Series",
    "depends_on": "eval:doc.invoice_numbering=='ERPNext numbers the invoice (separate store series)'",
    "mandatory_depends_on": "eval:doc.invoice_numbering=='ERPNext numbers the invoice (separate store series)'",
-   "description": "The naming series ERPNext gives this store's invoices, e.g. SPLENDX-INV-.YYYY.-  Added to the Sales Invoice series list if it is not there yet."
+   "description": "The naming series ERPNext gives this store's invoices, e.g. STORE-INV-.YYYY.-  Added to the Sales Invoice series list if it is not there yet."
   },
   {
    "depends_on": "eval:doc.invoice_numbering=='The store numbers the invoice'",
